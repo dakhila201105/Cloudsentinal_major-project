@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Review Approval{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-4">
+  <div class="col-md-7">
+    <div class="card cs-card shadow p-4">
+      <h4 class="mb-3"><i class="fa-solid fa-magnifying-glass me-2"></i>Review Login Request</h4>
+
+      <ul class="mb-4">
+        <li><strong>Username:</strong> {{ approval.user.username }}</li>
+        <li><strong>Device:</strong> {{ approval.user_agent }}</li>
+        <li><strong>IP Address:</strong> {{ approval.ip_address }}</li>
+        <li><strong>Location:</strong> {{ approval.location }}</li>
+        <li><strong>Login Time:</strong> {{ approval.created_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC</li>
+        <li><strong>Risk Score:</strong> {{ approval.risk_score }}/100 ({{ approval.risk_level }})</li>
+        <li><strong>AI Behavior Analysis:</strong> anomaly={{ approval.ai_anomaly }} — {{ approval.reasons or 'no specific flags' }}</li>
+        <li><strong>Status:</strong> {{ approval.status }}</li>
+      </ul>
+
+      {% if approval.status == "PENDING_ADMIN" %}
+      <form method="POST">
+        <label class="form-label">Administrator Approval Code (emailed to admin inbox)</label>
+        <input type="text" name="otp" maxlength="6" class="form-control form-control-lg text-center mb-3" placeholder="••••••">
+        <div class="d-flex gap-2">
+          <button type="submit" name="decision" value="approve" class="btn cs-btn flex-fill">Approve &amp; Trust Device</button>
+          <button type="submit" name="decision" value="deny" class="btn btn-outline-danger flex-fill">Deny</button>
+        </div>
+      </form>
+      {% else %}
+      <p class="text-muted">This request has already been resolved ({{ approval.status }}).</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

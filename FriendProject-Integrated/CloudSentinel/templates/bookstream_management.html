@@ -1,0 +1,100 @@
+{% extends 'base.html' %}
+{% block title %}BookStream Management{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2>BookStream Management</h2>
+  <a class="btn btn-outline-primary" href="{{ url_for('integration.security_dashboard') }}">Security Intelligence</a>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="card shadow-sm">
+      <div class="card-header fw-semibold">BookStream Users</div>
+      <div class="card-body" id="users"><span class="text-muted">Loading users…</span></div>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card shadow-sm">
+      <div class="card-header fw-semibold">Book Catalog</div>
+      <div class="card-body" id="books"><span class="text-muted">Loading books…</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="card shadow-sm mt-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span class="fw-semibold">Recent BookStream Activity</span>
+    <small class="text-muted">Latest 100 events · refreshes every 10 seconds</small>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead><tr><th>Time</th><th>User</th><th>Activity</th><th>Resource</th><th>Risk</th><th>Result</th></tr></thead>
+      <tbody id="events"><tr><td colspan="6" class="text-muted p-3">Loading activity…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+
+async function loadBookStreamManagement() {
+  try {
+    const [usersResponse, booksResponse, eventsResponse] = await Promise.all([
+      fetch('/api/admin/integration/users'),
+      fetch('/api/admin/bookstream/books'),
+      fetch('/api/admin/bookstream/events')
+    ]);
+    if (![usersResponse, booksResponse, eventsResponse].every(response => response.ok)) {
+      throw new Error('Unable to load BookStream management data');
+    }
+    const [users, books, events] = await Promise.all([
+      usersResponse.json(), booksResponse.json(), eventsResponse.json()
+    ]);
+
+    document.getElementById('users').innerHTML = users.map(user => `
+      <div class="border rounded p-2 mb-2 d-flex justify-content-between align-items-center">
+        <span><b>${escapeHtml(user.username)}</b><br><small>${escapeHtml(user.email)}</small></span>
+        <span>
+          <button class="btn btn-sm btn-outline-danger" onclick="setBookStreamStatus('${escapeHtml(user.bookstream_user_id)}','FROZEN')">Freeze</button>
+          <button class="btn btn-sm btn-outline-success" onclick="setBookStreamStatus('${escapeHtml(user.bookstream_user_id)}','ACTIVE')">Unfreeze</button>
+        </span>
+      </div>`).join('') || '<span class="text-muted">No users yet. Sign in to BookStream to connect an account.</span>';
+
+    document.getElementById('books').innerHTML = books.map(book => `
+      <div class="border rounded p-2 mb-2 d-flex justify-content-between align-items-center">
+        <span><b>${escapeHtml(book.title)}</b><br><small>${escapeHtml(book.author)} · ${escapeHtml(book.genre)}</small></span>
+        <button class="btn btn-sm btn-outline-danger" onclick="deleteBook('${escapeHtml(book._id)}')">Delete</button>
+      </div>`).join('') || '<span class="text-muted">No books yet.</span>';
+
+    document.getElementById('events').innerHTML = events.map(event => `
+      <tr>
+        <td class="text-nowrap">${event.timestamp ? escapeHtml(new Date(event.timestamp).toLocaleString()) : '—'}</td>
+        <td>${escapeHtml(event.username)}</td>
+        <td>${escapeHtml(event.event_type)}</td>
+        <td>${escapeHtml(event.resource_name || event.reason || '—')}</td>
+        <td><span class="badge text-bg-${event.risk_level === 'LOW' ? 'success' : event.risk_level === 'MEDIUM' ? 'warning' : 'danger'}">${escapeHtml(event.risk_level)} · ${escapeHtml(event.risk_score)}</span></td>
+        <td>${escapeHtml(event.action)}</td>
+      </tr>`).join('') || '<tr><td colspan="6" class="text-muted p-3">No BookStream activity recorded yet.</td></tr>';
+  } catch (error) {
+    document.getElementById('events').innerHTML = '<tr><td colspan="6" class="text-danger p-3">Could not load BookStream activity. Check that both services are running.</td></tr>';
+    console.error(error);
+  }
+}
+
+async function setBookStreamStatus(id, status) {
+  await fetch('/api/admin/bookstream/user/' + encodeURIComponent(id), {
+    method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({status})
+  });
+  loadBookStreamManagement();
+}
+
+async function deleteBook(id) {
+  if (!confirm('Delete this book?')) return;
+  await fetch('/api/admin/bookstream/book/' + encodeURIComponent(id), {method:'DELETE'});
+  loadBookStreamManagement();
+}
+
+loadBookStreamManagement();
+setInterval(loadBookStreamManagement, 10000);
+</script>
+{% endblock %}

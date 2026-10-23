@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Verify OTP{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-5">
+  <div class="col-md-4">
+    <div class="card cs-card shadow p-4">
+      <h4 class="mb-3">Verify OTP</h4>
+      <p class="text-muted small mb-3">Enter the code sent to your email.</p>
+      <form method="POST">
+        <div class="mb-3">
+          <label class="form-label">Verification Code</label>
+          <input type="text" name="otp" class="form-control text-center" maxlength="6" required autofocus>
+        </div>
+        <button type="submit" class="btn cs-btn w-100">Verify</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/device_fingerprint.js') }}"></script>
+{% endblock %}

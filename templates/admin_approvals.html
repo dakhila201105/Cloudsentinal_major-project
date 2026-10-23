@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Pending Approvals{% endblock %}
+{% block content %}
+<h4 class="mb-3"><i class="fa-solid fa-user-shield me-2"></i>Pending Device Approvals</h4>
+<div class="card cs-card p-3">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover">
+      <thead>
+        <tr><th>Requested</th><th>Username</th><th>IP</th><th>Location</th><th>Risk</th><th>AI Anomaly</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for a in approvals %}
+        <tr>
+          <td class="small">{{ a.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+          <td>{{ a.user.username }}</td>
+          <td class="small">{{ a.ip_address }}</td>
+          <td class="small">{{ a.location }}</td>
+          <td><span class="badge bg-{{ 'success' if a.risk_level=='LOW' else ('warning text-dark' if a.risk_level=='MEDIUM' else 'danger') }}">{{ a.risk_score }} ({{ a.risk_level }})</span></td>
+          <td class="small">{{ a.ai_anomaly }}</td>
+          <td><a href="{{ url_for('admin_approval_detail', approval_id=a.id) }}" class="btn btn-sm btn-outline-primary">Review</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-center text-muted">No pending approvals right now.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

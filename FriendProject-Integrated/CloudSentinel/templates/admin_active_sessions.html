@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Active Sessions{% endblock %}
+{% block content %}
+<h4 class="mb-3"><i class="fa-solid fa-desktop me-2"></i>Active Sessions Monitor</h4>
+
+<div class="card cs-card p-3 mb-3">
+  <form method="GET" class="row g-3">
+    <div class="col-md-4">
+      <input type="text" name="search" class="form-control" placeholder="Search by username, email, IP, or MAC..." value="{{ search }}">
+    </div>
+    <div class="col-md-3">
+      <select name="status" class="form-select">
+        <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All Status</option>
+        <option value="ACTIVE" {% if status_filter == 'ACTIVE' %}selected{% endif %}>Active</option>
+        <option value="TERMINATED" {% if status_filter == 'TERMINATED' %}selected{% endif %}>Terminated</option>
+      </select>
+    </div>
+    <div class="col-md-2">
+      <button type="submit" class="btn btn-primary">Filter</button>
+    </div>
+    <div class="col-md-3">
+      <a href="{{ url_for('admin_active_sessions') }}" class="btn btn-outline-secondary">Clear Filters</a>
+    </div>
+  </form>
+</div>
+
+<div class="card cs-card p-3">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover">
+      <thead>
+        <tr>
+          <th>Session ID</th>
+          <th>User</th>
+          <th>Email</th>
+          <th>IP</th>
+          <th>Device ID</th>
+          <th>Browser</th>
+          <th>OS</th>
+          <th>Login Time</th>
+          <th>Duration</th>
+          <th>Last Activity</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for sess in sessions %}
+        <tr>
+          <td class="small text-truncate" style="max-width:80px;" title="{{ sess.session_id }}">{{ sess.session_id[:16] }}...</td>
+          <td>{{ sess.username }}</td>
+          <td class="small">{{ sess.email }}</td>
+          <td class="small">{{ sess.ip_address }}</td>
+          <td class="small"><code>{{ sess.mac_address }}</code></td>
+          <td class="small">{{ sess.browser }}</td>
+          <td class="small">{{ sess.operating_system }}</td>
+          <td class="small">{{ sess.login_time.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+          <td class="small" data-login-time="{{ sess.login_time.strftime('%Y-%m-%dT%H:%M:%S') }}">Calculating...</td>
+          <td class="small">{{ sess.last_activity.strftime('%H:%M:%S') }}</td>
+          <td>
+            {% if sess.status == 'ACTIVE' and sess.last_activity >= active_cutoff %}
+              <span class="badge bg-success">ACTIVE · PRESENT</span>
+            {% elif sess.status == 'ACTIVE' %}
+              <span class="badge bg-secondary">INACTIVE · STALE</span>
+            {% else %}
+              <span class="badge bg-secondary">{{ sess.status }}</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if sess.status == 'ACTIVE' and sess.last_activity >= active_cutoff %}
+              <form method="POST" action="{{ url_for('terminate_session', session_id=sess.id) }}" onsubmit="return confirm('Terminate this session?');">
+                <button type="submit" class="btn btn-sm btn-outline-danger">Terminate</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="12" class="text-center text-muted">No sessions found.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+// Calculate session durations
+document.addEventListener('DOMContentLoaded', function() {
+  const durationCells = document.querySelectorAll('td[data-login-time]');
+  const now = new Date();
+  
+  durationCells.forEach(cell => {
+    const loginTime = new Date(cell.dataset.loginTime);
+    const durationMs = now - loginTime;
+    const hours = Math.floor(durationMs / 3600000);
+    const minutes = Math.floor((durationMs % 3600000) / 60000);
+    cell.textContent = `${hours}h ${minutes}m`;
+  });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<!-- This page looks like a real dashboard but is a decoy: no genuine data
+     is ever rendered here, and every click is silently logged. -->
+<div class="row">
+  <div class="col-12">
+    <h3><i class="fa-solid fa-gauge me-2"></i>Cloud Resource Dashboard</h3>
+    <p class="text-muted">Welcome back. Here is your organization's cloud overview.</p>
+  </div>
+</div>
+<div class="row g-3 mb-4">
+  <div class="col-md-3"><div class="card cs-card p-3"><h6 class="text-muted">Storage Buckets</h6><h3>128</h3></div></div>
+  <div class="col-md-3"><div class="card cs-card p-3"><h6 class="text-muted">Active VMs</h6><h3>54</h3></div></div>
+  <div class="col-md-3"><div class="card cs-card p-3"><h6 class="text-muted">Users</h6><h3>312</h3></div></div>
+  <div class="col-md-3"><div class="card cs-card p-3"><h6 class="text-muted">Monthly Spend</h6><h3>$18,204</h3></div></div>
+</div>
+<div class="card cs-card p-3">
+  <h5>Sensitive Financial Records</h5>
+  <table class="table">
+    <thead><tr><th>Record ID</th><th>Client</th><th>Amount</th><th></th></tr></thead>
+    <tbody id="decoy-table">
+      <tr><td>FR-1029</td><td>Nimbus Traders</td><td>$92,410</td><td><button class="btn btn-sm btn-outline-primary decoy-action" data-action="viewed record FR-1029">View</button></td></tr>
+      <tr><td>FR-1030</td><td>Orbital Retail</td><td>$45,200</td><td><button class="btn btn-sm btn-outline-primary decoy-action" data-action="viewed record FR-1030">View</button></td></tr>
+      <tr><td>FR-1031</td><td>Skyline Freight</td><td>$120,900</td><td><button class="btn btn-sm btn-outline-primary decoy-action" data-action="viewed record FR-1031">View</button></td></tr>
+    </tbody>
+  </table>
+  <button class="btn btn-outline-danger btn-sm decoy-action" data-action="attempted bulk export of financial records">
+    <i class="fa-solid fa-download me-1"></i>Export All
+  </button>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.querySelectorAll('.decoy-action').forEach(btn => {
+  btn.addEventListener('click', () => {
+    fetch("{{ url_for('honeypot_log_action') }}", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({action: btn.dataset.action})
+    });
+    btn.disabled = true;
+    btn.innerText = "Loading...";
+  });
+});
+</script>
+{% endblock %}

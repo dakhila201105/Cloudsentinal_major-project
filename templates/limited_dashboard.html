@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Limited Access{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-4">
+  <div class="col-md-7">
+    <div class="alert alert-warning">
+      <i class="fa-solid fa-triangle-exclamation me-2"></i>
+      <strong>Medium Risk Detected (score {{ risk_score }}/100).</strong> Your session has been granted read-only access pending additional verification.
+    </div>
+    <div class="card cs-card p-3 mb-3">
+      <h6>Why was this flagged?</h6>
+      <ul class="mb-0">
+        {% for r in reasons %}<li>{{ r }}</li>{% endfor %}
+      </ul>
+    </div>
+    <div class="card cs-card p-3">
+      <h6>Read-only Resource Summary</h6>
+      <p class="text-muted small mb-0">Write operations, downloads, and administrative actions are disabled for this session. Contact your security team if you believe this is an error.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

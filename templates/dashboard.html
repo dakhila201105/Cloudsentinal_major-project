@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+{% block title %}Security Dashboard · CloudSentinel{% endblock %}
+{% block content %}
+
+<!-- KPI cards -->
+<div class="row g-3 mb-3">
+  <div class="col-md-2col col-md-2">
+    <div class="card cs-card p-3 text-center"><h6 class="text-muted mb-1">Total Logins</h6><h3>{{ total_logins }}</h3></div>
+  </div>
+  <div class="col-md-2">
+    <div class="card cs-card p-3 text-center"><h6 class="text-muted mb-1">Low Risk</h6><h3 class="text-success">{{ low_risk_count }}</h3></div>
+  </div>
+  <div class="col-md-2">
+    <div class="card cs-card p-3 text-center"><h6 class="text-muted mb-1">Medium Risk</h6><h3 class="text-warning">{{ medium_risk_count }}</h3></div>
+  </div>
+  <div class="col-md-2">
+    <div class="card cs-card p-3 text-center"><h6 class="text-muted mb-1">High Risk</h6><h3 class="text-danger">{{ high_risk_count }}</h3></div>
+  </div>
+  <div class="col-md-2">
+    <div class="card cs-card p-3 text-center"><h6 class="text-muted mb-1">Known Devices</h6><h3>{{ active_devices }}</h3></div>
+  </div>
+  <div class="col-md-2">
+    <div class="card cs-card p-3 text-center">
+      <h6 class="text-muted mb-1">System State</h6>
+      {% if state and state.lockdown %}
+        <h5 class="text-danger">LOCKDOWN</h5>
+      {% else %}
+        <h5 class="text-success">Operational</h5>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Data Management Section (Admin only) -->
+{% if current_user.role == 'admin' %}
+<div class="row g-3 mb-3">
+  <div class="col-12">
+    <div class="card cs-card p-3">
+      <h6><i class="fa-solid fa-sliders me-1"></i>Data Management</h6>
+      <div class="d-flex gap-2 flex-wrap">
+        <a href="{{ url_for('admin_login_logs') }}" class="btn btn-primary">
+          <i class="fas fa-list"></i> Manage Login Logs
+        </a>
+        <a href="{{ url_for('admin_all_approvals') }}" class="btn btn-info">
+          <i class="fas fa-list"></i> Manage All Approvals
+        </a>
+        <a href="{{ url_for('admin_approvals') }}" class="btn btn-warning">
+          <i class="fas fa-hourglass-half"></i> Pending Device Approvals
+        </a>
+        <a href="{{ url_for('admin_pending_requests') }}" class="btn btn-success">
+          <i class="fas fa-user-clock"></i> Pending Access Requests
+        </a>
+        <a href="{{ url_for('admin_active_sessions') }}" class="btn btn-secondary">
+          <i class="fas fa-desktop"></i> Active Sessions
+        </a>
+        <form method="POST" action="{{ url_for('admin_test_mail') }}" class="d-inline">
+          <button type="submit" class="btn btn-outline-primary">
+            <i class="fas fa-envelope-circle-check"></i> Test Mail
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="row g-3 mb-3">
+  <div class="col-md-4">
+    <div class="card cs-card p-3 h-100">
+      <h6><i class="fa-solid fa-chart-pie me-1"></i>Risk Distribution</h6>
+      <canvas id="riskChart" height="220"></canvas>
+    </div>
+  </div>
+  <!-- Replica / lockdown status -->
+  <div class="col-md-4">
+    <div class="card cs-card p-3 h-100">
+      <h6><i class="fa-solid fa-database me-1"></i>Data Protection Status</h6>
+      <p class="mb-1"><strong>Primary storage:</strong>
+        {% if replica and replica.primary_frozen %}<span class="badge bg-danger">Frozen (read-only)</span>{% else %}<span class="badge bg-success">Read/Write</span>{% endif %}
+      </p>
+      <p class="mb-1"><strong>Hidden replica:</strong>
+        {% if replica and replica.replica_active %}<span class="badge bg-warning text-dark">Active</span>{% else %}<span class="badge bg-secondary">Standby</span>{% endif %}
+      </p>
+      {% if replica and replica.last_triggered %}
+      <p class="small text-muted mb-1">Last triggered: {{ replica.last_triggered }} UTC</p>
+      <p class="small text-muted">Reason: {{ replica.reason }}</p>
+      {% endif %}
+      {% if current_user.role == 'admin' %}
+      <div class="d-flex gap-2 mt-2">
+        <form method="POST" action="{{ url_for('engage_lockdown') }}"><button class="btn btn-sm btn-outline-danger">Engage Lockdown</button></form>
+        <form method="POST" action="{{ url_for('release_lockdown') }}"><button class="btn btn-sm btn-outline-success">Release Lockdown</button></form>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  <!-- Architecture diagram -->
+  <div class="col-md-4">
+    <div class="card cs-card p-3 h-100">
+      <h6><i class="fa-solid fa-diagram-project me-1"></i>Security Pipeline</h6>
+      <div class="pipeline small">
+        <div class="pipe-step">1. Credentials</div>
+        <div class="pipe-arrow">↓</div>
+        <div class="pipe-step">2. OTP Verify</div>
+        <div class="pipe-arrow">↓</div>
+        <div class="pipe-step">3. Zero Trust Check</div>
+        <div class="pipe-arrow">↓</div>
+        <div class="pipe-step">4. AI Behavior Analysis</div>
+        <div class="pipe-arrow">↓</div>
+        <div class="pipe-step">5. Risk Scoring</div>
+        <div class="pipe-arrow">↓</div>
+        <div class="pipe-step">6. Adaptive Decision</div>
+        <div class="pipe-arrow">↓</div>
+        <div class="pipe-branches">
+          <span class="badge bg-success">Low → Allow</span>
+          <span class="badge bg-warning text-dark">Medium → Limit</span>
+          <span class="badge bg-danger">High → Honeypot + Replica</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-6">
+    <div class="card cs-card p-3">
+      <h6><i class="fa-solid fa-list-check me-1"></i>Recent Login Attempts</h6>
+      <div class="table-responsive" style="max-height:320px; overflow:auto;">
+        <table class="table table-sm table-hover">
+          <thead><tr><th>Time</th><th>User</th><th>IP</th><th>Location</th><th>Risk</th><th>Decision</th></tr></thead>
+          <tbody>
+            {% for log in logs %}
+            <tr>
+              <td class="small">{{ log.timestamp.strftime('%H:%M:%S') }}</td>
+              <td>{{ log.username_attempted }}</td>
+              <td class="small">{{ log.ip_address }}</td>
+              <td class="small">{{ log.location or '-' }}</td>
+              <td>
+                {% if log.risk_level == 'LOW' %}<span class="badge bg-success">{{ log.risk_score }}</span>
+                {% elif log.risk_level == 'MEDIUM' %}<span class="badge bg-warning text-dark">{{ log.risk_score }}</span>
+                {% elif log.risk_level == 'HIGH' %}<span class="badge bg-danger">{{ log.risk_score }}</span>
+                {% else %}<span class="badge bg-secondary">-</span>{% endif %}
+              </td>
+              <td class="small">{{ log.decision }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card cs-card p-3">
+      <h6><i class="fa-solid fa-bug me-1"></i>Honeypot Interaction Log</h6>
+      <div class="table-responsive" style="max-height:320px; overflow:auto;">
+        <table class="table table-sm table-hover">
+          <thead><tr><th>Time</th><th>IP</th><th>Attempted User</th><th>Action</th></tr></thead>
+          <tbody>
+            {% for h in honeypot_logs %}
+            <tr>
+              <td class="small">{{ h.timestamp.strftime('%H:%M:%S') }}</td>
+              <td class="small">{{ h.ip_address }}</td>
+              <td>{{ h.username_attempted }}</td>
+              <td class="small">{{ h.action }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="card cs-card p-3">
+      <h6><i class="fa-solid fa-radiation me-1"></i>Threat Log</h6>
+      <div class="table-responsive" style="max-height:260px; overflow:auto;">
+        <table class="table table-sm table-hover">
+          <thead><tr><th>Time</th><th>Source IP</th><th>Description</th><th>Severity</th></tr></thead>
+          <tbody>
+            {% for t in threats %}
+            <tr>
+              <td class="small">{{ t.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+              <td class="small">{{ t.source_ip }}</td>
+              <td class="small">{{ t.description }}</td>
+              <td><span class="badge bg-danger">{{ t.severity }}</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-7">
+    <div class="card cs-card p-3">
+      <h6><i class="fa-solid fa-user-shield me-1"></i>Pending Dual-Approval Requests</h6>
+      <div class="table-responsive" style="max-height:260px; overflow:auto;">
+        <table class="table table-sm table-hover">
+          <thead><tr><th>Time</th><th>User</th><th>IP</th><th>Risk</th><th>Stage</th>{% if current_user.role == 'admin' %}<th></th>{% endif %}</tr></thead>
+          <tbody>
+            {% for a in pending_approvals %}
+            <tr>
+              <td class="small">{{ a.created_at.strftime('%H:%M:%S') }}</td>
+              <td>{{ a.user.username }}</td>
+              <td class="small">{{ a.ip_address }}</td>
+              <td><span class="badge bg-{{ 'success' if a.risk_level=='LOW' else ('warning text-dark' if a.risk_level=='MEDIUM' else 'danger') }}">{{ a.risk_score }}</span></td>
+              <td class="small">{{ a.status }}</td>
+              {% if current_user.role == 'admin' %}
+              <td>{% if a.status == 'PENDING_ADMIN' %}<a href="{{ url_for('admin_approval_detail', approval_id=a.id) }}" class="btn btn-sm btn-outline-primary">Review</a>{% endif %}</td>
+              {% endif %}
+            </tr>
+            {% else %}
+            <tr><td colspan="6" class="text-center text-muted">No pending requests.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-5">
+    <div class="card cs-card p-3">
+      <h6><i class="fa-solid fa-ban me-1"></i>Blocked IP Addresses</h6>
+      <div class="table-responsive" style="max-height:260px; overflow:auto;">
+        <table class="table table-sm table-hover">
+          <thead><tr><th>IP</th><th>Until</th><th>Reason</th></tr></thead>
+          <tbody>
+            {% for b in blocked_ips %}
+            <tr>
+              <td class="small">{{ b.ip_address }}</td>
+              <td class="small">{{ b.blocked_until.strftime('%H:%M:%S') if b.blocked_until else '-' }}</td>
+              <td class="small">{{ b.reason }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" class="text-center text-muted">No blocked IPs.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="card cs-card p-3">
+      <h6><i class="fa-solid fa-file-shield me-1"></i>Immutable Authentication Audit Log</h6>
+      <div class="table-responsive" style="max-height:300px; overflow:auto;">
+        <table class="table table-sm table-hover">
+          <thead><tr><th>Time</th><th>User</th><th>Device ID</th><th>IP</th><th>Country</th><th>Auth Status</th><th>Risk</th><th>Admin Decision</th></tr></thead>
+          <tbody>
+            {% for e in audit_logs %}
+            <tr>
+              <td class="small">{{ e.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+              <td>{{ e.username }}</td>
+              <td class="small text-truncate" style="max-width:120px;">{{ e.device_id }}</td>
+              <td class="small">{{ e.ip_address }}</td>
+              <td class="small">{{ e.country }}</td>
+              <td class="small">{{ e.auth_status }}</td>
+              <td class="small">{{ e.risk_score }}</td>
+              <td class="small">{{ e.admin_decision }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+fetch("{{ url_for('dashboard_data') }}")
+  .then(r => r.json())
+  .then(d => {
+    new Chart(document.getElementById('riskChart'), {
+      type: 'doughnut',
+      data: {
+        labels: ['Low', 'Medium', 'High'],
+        datasets: [{ data: [d.low, d.medium, d.high], backgroundColor: ['#22c55e', '#f59e0b', '#ef4444'] }]
+      },
+      options: { plugins: { legend: { position: 'bottom' } } }
+    });
+  });
+</script>
+{% endblock %}

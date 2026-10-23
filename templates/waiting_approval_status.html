@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Waiting for Approval{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-5">
+  <div class="col-md-6 text-center">
+    <div class="card cs-card shadow p-4" id="waiting-view">
+      <i class="fa-solid fa-hourglass-half fa-3x text-primary mb-3"></i>
+      <h4>Waiting for Administrator Approval</h4>
+      <p class="text-muted small mb-4" id="waiting-message">
+        {% if request.status == "MAIL_FAILED" %}
+        Administrator approval email could not be delivered. Please contact an administrator to resend it.
+        {% else %}
+        Your access request has been sent to the administrator. Please wait for approval.
+        {% endif %}
+      </p>
+
+      <div class="spinner-border text-primary mt-2" role="status"><span class="visually-hidden">Waiting...</span></div>
+      <p class="small text-muted mt-3 mb-0">This page checks automatically every 3 seconds — no need to refresh.</p>
+    </div>
+    <div class="card cs-card shadow p-4 d-none" id="approved-view">
+      <i class="fa-solid fa-circle-check fa-3x text-success mb-3"></i>
+      <h4>Access Approved</h4>
+      <p class="text-muted small mb-0">Redirecting you to the Cloud Dashboard...</p>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const requestId = {{ request.id }};
+async function poll() {
+  try {
+    const res = await fetch(`/api/access-request-status/${requestId}`);
+    const data = await res.json();
+    if (data.status === "APPROVED") {
+      document.getElementById("waiting-view").classList.add("d-none");
+      document.getElementById("approved-view").classList.remove("d-none");
+      setTimeout(function () {
+        window.location.href = `/finalize-access-request/${requestId}`;
+      }, 1500);
+      return;
+    }
+    if (data.status === "DENIED") {
+      window.location.href = `/finalize-access-request/${requestId}`;
+      return;
+    }
+    if (data.status === "MAIL_FAILED") {
+      document.getElementById("waiting-message").textContent =
+        data.message || "Administrator approval email could not be delivered. Please contact an administrator to resend it.";
+    }
+    if (data.status === "PENDING") {
+      document.getElementById("waiting-message").textContent =
+        "Your access request has been sent to the administrator. Please wait for approval.";
+    }
+  } catch (e) { /* ignore transient errors */ }
+  setTimeout(poll, 3000);
+}
+poll();
+</script>
+{% endblock %}

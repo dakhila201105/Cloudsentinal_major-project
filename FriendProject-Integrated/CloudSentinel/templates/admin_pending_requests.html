@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Pending Access Requests{% endblock %}
+{% block content %}
+<h4 class="mb-3"><i class="fa-solid fa-user-clock me-2"></i>Pending Access Requests</h4>
+<div class="card cs-card p-3">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover">
+      <thead>
+        <tr><th>Requested</th><th>Username</th><th>Email</th><th>IP</th><th>Device ID</th><th>Browser</th><th>OS</th><th>Status</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for req in requests %}
+        <tr>
+          <td class="small">{{ req.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+          <td>{{ req.username }}</td>
+          <td class="small">{{ req.email }}</td>
+          <td class="small">{{ req.ip_address }}</td>
+          <td class="small"><code>{{ req.mac_address }}</code></td>
+          <td class="small">{{ req.browser }}</td>
+          <td class="small">{{ req.operating_system }}</td>
+          <td><span class="badge bg-warning text-dark">{{ req.status }}</span></td>
+          <td><a href="{{ url_for('admin_request_detail', request_id=req.id) }}" class="btn btn-sm btn-outline-primary">Review</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" class="text-center text-muted">No pending access requests right now.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<div class="card cs-card p-3 mt-4">
+  <h5>BookStream Frozen Account Sign-In Reviews</h5>
+  <p class="small text-muted">Review verified sign-in attempts from frozen accounts. Unfreezing restores BookStream access; keeping the account frozen denies the attempt.</p>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover">
+      <thead><tr><th>Requested</th><th>Username / Email</th><th>IP / Device</th><th>Risk</th><th>Reason</th><th>Decision</th></tr></thead>
+      <tbody>
+        {% for req in bookstream_requests %}
+        <tr>
+          <td class="small">{{ req.created_at.strftime('%Y-%m-%d %H:%M:%S') }}<br><span class="badge bg-danger">{{ req.request_type }}</span></td>
+          <td>{{ req.username }}<br><small>{{ req.email }}</small></td>
+          <td class="small">{{ req.ip_address }}<br><code>{{ req.device_fingerprint }}</code></td>
+          <td><span class="badge bg-danger">{{ req.risk_level }} · {{ '%.1f'|format(req.risk_score) }}/100</span></td>
+          <td class="small">{{ req.reasons }}</td>
+          <td class="text-nowrap">
+            <button class="btn btn-sm btn-success" onclick="reviewBookStream('{{ req.request_id }}','UNFREEZE')">Unfreeze &amp; allow</button>
+            <button class="btn btn-sm btn-danger" onclick="reviewBookStream('{{ req.request_id }}','KEEP_FROZEN')">Keep frozen</button>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-center text-muted">No BookStream frozen-account sign-in requests.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<script>
+async function reviewBookStream(requestId, decision) {
+  const result = await fetch('/api/admin/integration/approval/' + encodeURIComponent(requestId), {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({decision})
+  });
+  const data = await result.json();
+  if (!result.ok) { alert(data.message || 'Unable to record the decision.'); return; }
+  window.location.reload();
+}
+</script>
+{% endblock %}

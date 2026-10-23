@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <h2>Edit Login Log #{{ log.id }}</h2>
+        </div>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <div class="row">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">Edit Login Log Details</h5>
+                </div>
+                <div class="card-body">
+                    <form method="POST">
+                        <div class="form-group">
+                            <label for="username"><strong>Username (Read-only)</strong></label>
+                            <input type="text" class="form-control" id="username" value="{{ log.username_attempted }}" disabled>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="ip_address"><strong>IP Address (Read-only)</strong></label>
+                            <input type="text" class="form-control" id="ip_address" value="{{ log.ip_address }}" disabled>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="device_fingerprint"><strong>Device Fingerprint (Read-only)</strong></label>
+                            <textarea class="form-control" id="device_fingerprint" rows="2" disabled>{{ log.device_fingerprint }}</textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="location"><strong>Location</strong></label>
+                            <input type="text" class="form-control" id="location" name="location" value="{{ log.location or '' }}">
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group col-md-6">
+                                <label for="risk_level"><strong>Risk Level</strong></label>
+                                <select class="form-control" id="risk_level" name="risk_level">
+                                    <option value="LOW" {% if log.risk_level == 'LOW' %}selected{% endif %}>LOW</option>
+                                    <option value="MEDIUM" {% if log.risk_level == 'MEDIUM' %}selected{% endif %}>MEDIUM</option>
+                                    <option value="HIGH" {% if log.risk_level == 'HIGH' %}selected{% endif %}>HIGH</option>
+                                    <option value="N/A" {% if log.risk_level == 'N/A' %}selected{% endif %}>N/A</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group col-md-6">
+                                <label for="risk_score"><strong>Risk Score (0-100)</strong></label>
+                                <input type="number" class="form-control" id="risk_score" name="risk_score" min="0" max="100" step="0.1" value="{{ log.risk_score }}">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group col-md-6">
+                                <label for="decision"><strong>Decision</strong></label>
+                                <select class="form-control" id="decision" name="decision">
+                                    <option value="ALLOWED" {% if log.decision == 'ALLOWED' %}selected{% endif %}>ALLOWED</option>
+                                    <option value="LIMITED" {% if log.decision == 'LIMITED' %}selected{% endif %}>LIMITED</option>
+                                    <option value="HONEYPOT" {% if log.decision == 'HONEYPOT' %}selected{% endif %}>HONEYPOT</option>
+                                    <option value="BLOCKED" {% if log.decision == 'BLOCKED' %}selected{% endif %}>BLOCKED</option>
+                                    <option value="AWAITING_DUAL_APPROVAL" {% if log.decision == 'AWAITING_DUAL_APPROVAL' %}selected{% endif %}>AWAITING_DUAL_APPROVAL</option>
+                                    <option value="REJECTED_BAD_CREDENTIALS" {% if log.decision == 'REJECTED_BAD_CREDENTIALS' %}selected{% endif %}>REJECTED_BAD_CREDENTIALS</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group col-md-6">
+                                <label for="success"><strong>Login Success</strong></label>
+                                <div class="custom-control custom-checkbox">
+                                    <input type="checkbox" class="custom-control-input" id="success" name="success" {% if log.success %}checked{% endif %}>
+                                    <label class="custom-control-label" for="success">
+                                        Successful Login
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="timestamp"><strong>Timestamp (Read-only)</strong></label>
+                            <input type="text" class="form-control" id="timestamp" value="{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') if log.timestamp else 'N/A' }}" disabled>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="user_agent"><strong>User Agent (Read-only)</strong></label>
+                            <textarea class="form-control" id="user_agent" rows="2" disabled>{{ log.user_agent }}</textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <button type="submit" class="btn btn-success btn-lg">
+                                <i class="fas fa-save"></i> Save Changes
+                            </button>
+                            <a href="{{ url_for('admin_login_logs') }}" class="btn btn-secondary btn-lg">
+                                <i class="fas fa-times"></i> Cancel
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header bg-secondary text-white">
+                    <h5 class="mb-0">Quick Info</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <strong>Log ID:</strong> {{ log.id }}
+                    </div>
+                    <div class="mb-3">
+                        <strong>Username:</strong> {{ log.username_attempted }}
+                    </div>
+                    <div class="mb-3">
+                        <strong>IP Address:</strong> {{ log.ip_address }}
+                    </div>
+                    <div class="mb-3">
+                        <strong>Current Risk Level:</strong>
+                        {% if log.risk_level == 'HIGH' %}
+                            <span class="badge badge-danger">{{ log.risk_level }}</span>
+                        {% elif log.risk_level == 'MEDIUM' %}
+                            <span class="badge badge-warning">{{ log.risk_level }}</span>
+                        {% else %}
+                            <span class="badge badge-success">{{ log.risk_level }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="mb-3">
+                        <strong>Current Risk Score:</strong> {{ log.risk_score }}
+                    </div>
+                    <div class="mb-3">
+                        <strong>Success:</strong>
+                        {% if log.success %}
+                            <span class="badge badge-success">Yes</span>
+                        {% else %}
+                            <span class="badge badge-danger">No</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

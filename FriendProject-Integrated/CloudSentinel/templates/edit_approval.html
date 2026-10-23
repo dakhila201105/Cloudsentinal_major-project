@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <h2>Edit Approval Request #{{ approval.id }}</h2>
+        </div>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <div class="row">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">Edit Approval Request Details</h5>
+                </div>
+                <div class="card-body">
+                    <form method="POST">
+                        <div class="form-group">
+                            <label for="username"><strong>Username (Read-only)</strong></label>
+                            <input type="text" class="form-control" id="username" value="{{ approval.user.username }}" disabled>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="ip_address"><strong>IP Address (Read-only)</strong></label>
+                            <input type="text" class="form-control" id="ip_address" value="{{ approval.ip_address }}" disabled>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="device_fingerprint"><strong>Device Fingerprint (Read-only)</strong></label>
+                            <textarea class="form-control" id="device_fingerprint" rows="2" disabled>{{ approval.device_fingerprint }}</textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="user_agent"><strong>User Agent (Read-only)</strong></label>
+                            <textarea class="form-control" id="user_agent" rows="2" disabled>{{ approval.user_agent }}</textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="location"><strong>Location</strong></label>
+                            <input type="text" class="form-control" id="location" name="location" value="{{ approval.location or '' }}">
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group col-md-6">
+                                <label for="risk_level"><strong>Risk Level</strong></label>
+                                <select class="form-control" id="risk_level" name="risk_level">
+                                    <option value="LOW" {% if approval.risk_level == 'LOW' %}selected{% endif %}>LOW</option>
+                                    <option value="MEDIUM" {% if approval.risk_level == 'MEDIUM' %}selected{% endif %}>MEDIUM</option>
+                                    <option value="HIGH" {% if approval.risk_level == 'HIGH' %}selected{% endif %}>HIGH</option>
+                                    <option value="N/A" {% if approval.risk_level == 'N/A' %}selected{% endif %}>N/A</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group col-md-6">
+                                <label for="risk_score"><strong>Risk Score (0-100)</strong></label>
+                                <input type="number" class="form-control" id="risk_score" name="risk_score" min="0" max="100" step="0.1" value="{{ approval.risk_score }}">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group col-md-6">
+                                <label for="ai_anomaly"><strong>AI Anomaly Score (0-1)</strong></label>
+                                <input type="number" class="form-control" id="ai_anomaly" name="ai_anomaly" min="0" max="1" step="0.01" value="{{ approval.ai_anomaly }}">
+                            </div>
+
+                            <div class="form-group col-md-6">
+                                <label for="status"><strong>Status</strong></label>
+                                <select class="form-control" id="status" name="status">
+                                    <option value="PENDING_USER" {% if approval.status == 'PENDING_USER' %}selected{% endif %}>PENDING_USER</option>
+                                    <option value="PENDING_ADMIN" {% if approval.status == 'PENDING_ADMIN' %}selected{% endif %}>PENDING_ADMIN</option>
+                                    <option value="APPROVED" {% if approval.status == 'APPROVED' %}selected{% endif %}>APPROVED</option>
+                                    <option value="DENIED" {% if approval.status == 'DENIED' %}selected{% endif %}>DENIED</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="reasons"><strong>Reasons</strong></label>
+                            <textarea class="form-control" id="reasons" name="reasons" rows="3">{{ approval.reasons or '' }}</textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="created_at"><strong>Created (Read-only)</strong></label>
+                            <input type="text" class="form-control" id="created_at" value="{{ approval.created_at.strftime('%Y-%m-%d %H:%M:%S') if approval.created_at else 'N/A' }}" disabled>
+                        </div>
+
+                        <div class="form-group">
+                            <button type="submit" class="btn btn-success btn-lg">
+                                <i class="fas fa-save"></i> Save Changes
+                            </button>
+                            <a href="{{ url_for('admin_all_approvals') }}" class="btn btn-secondary btn-lg">
+                                <i class="fas fa-times"></i> Cancel
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header bg-secondary text-white">
+                    <h5 class="mb-0">Quick Info</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <strong>Approval ID:</strong> {{ approval.id }}
+                    </div>
+                    <div class="mb-3">
+                        <strong>Username:</strong> {{ approval.user.username }}
+                    </div>
+                    <div class="mb-3">
+                        <strong>IP Address:</strong> {{ approval.ip_address }}
+                    </div>
+                    <div class="mb-3">
+                        <strong>Current Risk Level:</strong>
+                        {% if approval.risk_level == 'HIGH' %}
+                            <span class="badge badge-danger">{{ approval.risk_level }}</span>
+                        {% elif approval.risk_level == 'MEDIUM' %}
+                            <span class="badge badge-warning">{{ approval.risk_level }}</span>
+                        {% else %}
+                            <span class="badge badge-success">{{ approval.risk_level }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="mb-3">
+                        <strong>Current Risk Score:</strong> {{ approval.risk_score }}
+                    </div>
+                    <div class="mb-3">
+                        <strong>Current Status:</strong>
+                        {% if approval.status == 'PENDING_USER' %}
+                            <span class="badge badge-warning">Pending User</span>
+                        {% elif approval.status == 'PENDING_ADMIN' %}
+                            <span class="badge badge-info">Pending Admin</span>
+                        {% elif approval.status == 'APPROVED' %}
+                            <span class="badge badge-success">Approved</span>
+                        {% elif approval.status == 'DENIED' %}
+                            <span class="badge badge-danger">Denied</span>
+                        {% endif %}
+                    </div>
+                    <div class="mb-3">
+                        <strong>AI Anomaly:</strong> {{ approval.ai_anomaly }}
+                    </div>
+                    <div class="mb-3">
+                        <strong>User Approved:</strong>
+                        <span class="badge {% if approval.user_approved %}badge-success{% else %}badge-secondary{% endif %}">
+                            {% if approval.user_approved %}Yes{% else %}No{% endif %}
+                        </span>
+                    </div>
+                    <div class="mb-3">
+                        <strong>Admin Approved:</strong>
+                        <span class="badge {% if approval.admin_approved %}badge-success{% else %}badge-secondary{% endif %}">
+                            {% if approval.admin_approved %}Yes{% else %}No{% endif %}
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

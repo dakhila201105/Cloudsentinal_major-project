@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Login{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-5">
+  <div class="col-md-4">
+    <div class="card cs-card shadow p-4">
+      <h4 class="mb-3">Login</h4>
+      <form method="POST">
+        <div class="mb-3">
+          <label class="form-label">Username</label>
+          <input type="text" name="username" class="form-control" required autofocus>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Password</label>
+          <input type="password" name="password" class="form-control" required>
+        </div>
+        <button type="submit" class="btn cs-btn w-100">Login</button>
+      </form>
+      <p class="small text-muted mt-3 mb-0 text-center">
+        <a href="{{ url_for('register') }}">Create an account</a>
+      </p>
+      <p class="small text-muted mt-2 mb-0 text-center">Build: {{ app_version }}</p>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/device_fingerprint.js') }}"></script>
+{% endblock %}

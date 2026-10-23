@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Waiting for Administrator Approval{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-5">
+  <div class="col-md-6 text-center">
+    <div class="card cs-card shadow p-4">
+      <i class="fa-solid fa-user-clock fa-3x text-warning mb-3"></i>
+      <h4>Waiting for Administrator Approval</h4>
+      <p class="text-muted small mb-4">You have successfully verified your OTP. Please request access to continue.</p>
+      
+      <form method="POST">
+        <div class="mb-3 text-start">
+          <label class="form-label small">Device Identifier (MAC Address if available)</label>
+          <input type="text" name="mac_address" class="form-control form-control-sm" placeholder="Optional: MAC address or device identifier">
+        </div>
+        <button type="submit" class="btn cs-btn w-100">
+          <i class="fa-solid fa-paper-plane me-2"></i>Request Access
+        </button>
+      </form>
+      
+      <p class="small text-muted mt-3 mb-0">An administrator will review your request and approve access.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

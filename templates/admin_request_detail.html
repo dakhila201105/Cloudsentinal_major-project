@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}Review Access Request{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-4">
+  <div class="col-md-7">
+    <div class="card cs-card shadow p-4">
+      <h4 class="mb-3"><i class="fa-solid fa-magnifying-glass me-2"></i>Review Access Request</h4>
+
+      {% if error %}
+      <div class="alert alert-danger">{{ error }}</div>
+      {% endif %}
+
+      <ul class="mb-4">
+        <li><strong>Username:</strong> {{ request.username }}</li>
+        <li><strong>Email:</strong> {{ request.email }}</li>
+        <li><strong>IP Address:</strong> {{ request.ip_address }}</li>
+        <li><strong>Device ID:</strong> <code>{{ request.mac_address }}</code></li>
+        <li><strong>Device Fingerprint:</strong> <code title="{{ request.device_fingerprint }}">{{ request.device_fingerprint }}</code></li>
+        <li><strong>Browser:</strong> {{ request.browser }}</li>
+        <li><strong>Operating System:</strong> {{ request.operating_system }}</li>
+        <li><strong>Location:</strong> {{ request.location }}</li>
+        {% if risk_context %}
+        <li><strong>Risk Score:</strong> {{ risk_context.score }}</li>
+        <li><strong>Risk Level:</strong> {{ risk_context.level }}</li>
+        <li><strong>Risk Decision:</strong> {{ risk_context.decision }}</li>
+        <li><strong>Risk Reasons:</strong> {{ risk_context.reasons }}</li>
+        {% endif %}
+        <li><strong>Login Time:</strong> {{ request.login_time.strftime('%Y-%m-%d %H:%M:%S') }} UTC</li>
+        <li><strong>Request Time:</strong> {{ request.created_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC</li>
+        <li>
+          <strong>Current Status:</strong>
+          {% if request.status == "MAIL_FAILED" %}
+          <span class="badge bg-danger">Email failed</span>
+          {% else %}
+          {{ request.status }}
+          {% endif %}
+        </li>
+      </ul>
+
+      {% if request.status == "MAIL_FAILED" %}
+      <div class="alert alert-warning">
+        The administrator approval email was not delivered. No usable approval code is active for this request.
+      </div>
+      {% elif code_state in ["expired", "used", "missing"] %}
+      <div class="alert alert-warning">
+        The approval code is {{ code_state }}. Resend a fresh approval email before approving this request.
+      </div>
+      {% endif %}
+
+      {% if existing_session %}
+      <div class="alert alert-warning">
+        <h6><i class="fa-solid fa-exclamation-triangle me-2"></i>User already has an active approved session.</h6>
+        <ul class="mb-2">
+          <li><strong>Device:</strong> {{ existing_session.browser }} on {{ existing_session.operating_system }}</li>
+          <li><strong>Active Device ID:</strong> <code>{{ existing_session.mac_address }}</code></li>
+          <li><strong>Active Fingerprint:</strong> <code title="{{ existing_session.device_fingerprint }}">{{ existing_session.device_fingerprint }}</code></li>
+          <li><strong>Requested Device ID:</strong> <code>{{ request.mac_address }}</code></li>
+          <li><strong>Requested Fingerprint:</strong> <code title="{{ request.device_fingerprint }}">{{ request.device_fingerprint }}</code></li>
+          <li><strong>Login Time:</strong> {{ existing_session.login_time.strftime('%Y-%m-%d %H:%M:%S') }} UTC</li>
+          <li><strong>Session Duration:</strong> {{ session_duration }}</li>
+        </ul>
+        <p class="mb-0">The fingerprints do not match, so this approval is blocked until the active session is terminated.</p>
+        <form method="POST" action="{{ url_for('terminate_session', session_id=existing_session.id) }}" class="mt-2">
+          <button type="submit" class="btn btn-danger btn-sm">Terminate Session</button>
+        </form>
+      </div>
+      {% endif %}
+
+      {% if request.status in ["PENDING", "MAIL_FAILED"] and not existing_session %}
+      <div class="d-flex gap-2">
+        {% if request.status == "PENDING" and code_state == "ready" %}
+        <button type="button" class="btn cs-btn flex-fill" data-bs-toggle="modal" data-bs-target="#approveCodeModal">Approve</button>
+        {% endif %}
+        <form method="POST" class="flex-fill">
+          <button type="submit" name="decision" value="resend" class="btn btn-outline-primary w-100">Resend Approval Email</button>
+        </form>
+        <form method="POST" class="flex-fill">
+          <button type="submit" name="decision" value="deny" class="btn btn-outline-danger w-100">Reject</button>
+        </form>
+      </div>
+
+      <div class="modal fade" id="approveCodeModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+          <div class="modal-content">
+            <form method="POST">
+              <div class="modal-header">
+                <h5 class="modal-title">Enter Approval Code</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+              </div>
+              <div class="modal-body">
+                <p class="small text-muted">Enter the one-time approval code sent to the administrator email.</p>
+                <input type="text" name="approval_code" maxlength="8" class="form-control form-control-lg text-center" placeholder="••••••••" autocomplete="off" required>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" name="decision" value="approve" class="btn cs-btn">Verify</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+      {% elif request.status != "PENDING" %}
+      <p class="text-muted">This request has already been resolved ({{ request.status }}).</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+{% if show_code_modal %}
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  var modal = document.getElementById("approveCodeModal");
+  if (modal) {
+    new bootstrap.Modal(modal).show();
+  }
+});
+</script>
+{% endif %}
+{% endblock %}

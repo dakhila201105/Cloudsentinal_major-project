@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Access Blocked{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-5">
+  <div class="col-md-6 text-center">
+    <i class="fa-solid fa-ban fa-4x text-danger mb-3"></i>
+    <h3>Access Temporarily Blocked</h3>
+    <p class="text-muted">Your IP address ({{ ip }}) has been temporarily blocked due to repeated denied authentication attempts.</p>
+    <p class="small text-muted">Please try again later, or contact your administrator if you believe this is an error.</p>
+  </div>
+</div>
+{% endblock %}

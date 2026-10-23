@@ -1,0 +1,72 @@
+from datetime import datetime
+from extensions import db
+
+class SecurityIdentity(db.Model):
+    __tablename__ = 'security_identities'
+    id = db.Column(db.Integer, primary_key=True)
+    bookstream_user_id = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    username = db.Column(db.String(120))
+    email = db.Column(db.String(180))
+    role = db.Column(db.String(30), default='user')
+    status = db.Column(db.String(20), default='ACTIVE')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_seen = db.Column(db.DateTime, default=datetime.utcnow)
+
+class SecurityEvent(db.Model):
+    __tablename__ = 'security_events'
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.String(80), unique=True, nullable=False, index=True)
+    bookstream_user_id = db.Column(db.String(64), index=True)
+    event_type = db.Column(db.String(50), nullable=False, index=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    ip_address = db.Column(db.String(64))
+    device_fingerprint = db.Column(db.String(128))
+    user_agent = db.Column(db.String(500))
+    location = db.Column(db.String(120))
+    session_id = db.Column(db.String(128), index=True)
+    resource_id = db.Column(db.String(128))
+    resource_name = db.Column(db.String(255))
+    risk_score = db.Column(db.Float, default=0)
+    anomaly_score = db.Column(db.Float, default=0)
+    risk_level = db.Column(db.String(20), default='LOW', index=True)
+    action = db.Column(db.String(40), default='RECORDED')
+    reason = db.Column(db.String(500))
+    metadata_json = db.Column(db.Text)
+
+class SecuritySession(db.Model):
+    __tablename__ = 'security_sessions'
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.String(128), unique=True, nullable=False, index=True)
+    bookstream_user_id = db.Column(db.String(64), nullable=False, index=True)
+    ip_address = db.Column(db.String(64))
+    device_fingerprint = db.Column(db.String(128))
+    user_agent = db.Column(db.String(500))
+    location = db.Column(db.String(120))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_activity = db.Column(db.DateTime, default=datetime.utcnow)
+    ended_at = db.Column(db.DateTime)
+    status = db.Column(db.String(20), default='ACTIVE', index=True)
+    risk_score = db.Column(db.Float, default=0)
+    risk_level = db.Column(db.String(20), default='LOW')
+
+class IntegrationAccessRequest(db.Model):
+    __tablename__ = 'integration_access_requests'
+    id = db.Column(db.Integer, primary_key=True)
+    request_id = db.Column(db.String(80), unique=True, nullable=False, index=True)
+    bookstream_user_id = db.Column(db.String(64), nullable=False, index=True)
+    username = db.Column(db.String(120))
+    email = db.Column(db.String(180))
+    ip_address = db.Column(db.String(64))
+    device_fingerprint = db.Column(db.String(128))
+    user_agent = db.Column(db.String(500))
+    location = db.Column(db.String(120))
+    risk_score = db.Column(db.Float, default=0)
+    anomaly_score = db.Column(db.Float, default=0)
+    risk_level = db.Column(db.String(20), default='MEDIUM')
+    reasons = db.Column(db.String(1000))
+    request_type = db.Column(db.String(40), default='RISK_REVIEW', nullable=False)
+    status = db.Column(db.String(20), default='PENDING', index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    decided_at = db.Column(db.DateTime)
+    decided_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    security_session_id = db.Column(db.String(128))

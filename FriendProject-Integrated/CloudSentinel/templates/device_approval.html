@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Approve New Device{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-5">
+  <div class="col-md-6">
+    <div class="card cs-card shadow">
+      <div class="card-body p-4">
+        <h4 class="text-center mb-1"><i class="fa-solid fa-mobile-screen-button me-2"></i>New Device Detected</h4>
+        <p class="text-center text-muted small mb-4">We don't recognize this device or location.</p>
+
+        <div class="card cs-card p-3 mb-3">
+          <ul class="mb-0 small">
+            <li><strong>IP Address:</strong> {{ approval.ip_address }}</li>
+            <li><strong>Location:</strong> {{ approval.location }}</li>
+            <li><strong>Risk Score:</strong> {{ approval.risk_score }}/100 ({{ approval.risk_level }})</li>
+            {% if approval.reasons %}<li><strong>Flags:</strong> {{ approval.reasons }}</li>{% endif %}
+          </ul>
+        </div>
+
+        <p class="small">If this is really you, an approval code was emailed to your registered address. Enter it below to continue — this will also notify the administrator for final sign-off.</p>
+        <form method="POST">
+          <input type="text" name="otp" maxlength="6" class="form-control form-control-lg text-center mb-3" placeholder="••••••" required autofocus>
+          <button type="submit" class="btn cs-btn w-100">Approve This Device</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

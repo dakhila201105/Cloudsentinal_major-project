@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Register · CloudSentinel{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-5">
+  <div class="col-md-5">
+    <div class="card cs-card shadow">
+      <div class="card-body p-4">
+        <h4 class="text-center mb-4"><i class="fa-solid fa-user-plus me-2"></i>Create Account</h4>
+        <form method="POST">
+          <div class="mb-3">
+            <label class="form-label">Username</label>
+            <input type="text" name="username" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Email</label>
+            <input type="email" name="email" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Password</label>
+            <input type="password" name="password" class="form-control" required minlength="6">
+          </div>
+          <button type="submit" class="btn cs-btn w-100">Register</button>
+        </form>
+        <p class="text-center mt-3 mb-0 small">Already have an account? <a href="{{ url_for('login') }}">Login</a></p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Review Access Request{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-4">
+  <div class="col-md-7">
+    <div class="card cs-card shadow p-4">
+      <h4 class="mb-3"><i class="fa-solid fa-magnifying-glass me-2"></i>Review Access Request</h4>
+
+      {% if error %}
+      <div class="alert alert-danger">{{ error }}</div>
+      {% endif %}
+
+      <ul class="mb-4">
+        <li><strong>Username:</strong> {{ request.username }}</li>
+        <li><strong>Email:</strong> {{ request.email }}</li>
+        <li><strong>IP Address:</strong> {{ request.ip_address }}</li>
+        <li><strong>Device ID:</strong> <code>{{ request.mac_address }}</code></li>
+        <li><strong>Device Fingerprint:</strong> <code>{{ request.device_fingerprint[:16] }}...</code></li>
+        <li><strong>Browser:</strong> {{ request.browser }}</li>
+        <li><strong>Operating System:</strong> {{ request.operating_system }}</li>
+        <li><strong>Location:</strong> {{ request.location }}</li>
+        <li><strong>Login Time:</strong> {{ request.login_time.strftime('%Y-%m-%d %H:%M:%S') }} UTC</li>
+        <li><strong>Request Time:</strong> {{ request.created_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC</li>
+        <li><strong>Status:</strong> {{ request.status }}</li>
+      </ul>
+
+      {% if existing_session %}
+      <div class="alert alert-warning">
+        <h6><i class="fa-solid fa-exclamation-triangle me-2"></i>Existing Active Session Detected</h6>
+        <p class="mb-2">User already has an active approved session:</p>
+        <ul class="mb-2">
+          <li><strong>Device:</strong> {{ existing_session.browser }} on {{ existing_session.operating_system }}</li>
+          <li><strong>Device ID:</strong> <code>{{ existing_session.mac_address }}</code></li>
+          <li><strong>Device Fingerprint:</strong> <code>{{ existing_session.device_fingerprint[:16] }}...</code></li>
+          <li><strong>IP Address:</strong> {{ existing_session.ip_address }}</li>
+          <li><strong>Login Time:</strong> {{ existing_session.login_time.strftime('%Y-%m-%d %H:%M:%S') }} UTC</li>
+          <li><strong>Session Duration:</strong> {{ session_duration }}</li>
+        </ul>
+        <p class="mb-0">Terminate the existing session first before approving another device.</p>
+        <form method="POST" action="{{ url_for('terminate_session', session_id=existing_session.id) }}" class="mt-2">
+          <button type="submit" class="btn btn-danger btn-sm">Terminate Existing Session</button>
+        </form>
+      </div>
+      {% endif %}
+
+      {% if request.status == "PENDING" and not existing_session %}
+      <form method="POST">
+        <label class="form-label">Administrator Approval Code (emailed to admin inbox)</label>
+        <input type="text" name="approval_code" maxlength="8" class="form-control form-control-lg text-center mb-3" placeholder="••••••••">
+        <div class="d-flex gap-2">
+          <button type="submit" name="decision" value="approve" class="btn cs-btn flex-fill">Approve</button>
+          <button type="submit" name="decision" value="deny" class="btn btn-outline-danger flex-fill">Deny</button>
+        </div>
+      </form>
+      {% elif request.status != "PENDING" %}
+      <p class="text-muted">This request has already been resolved ({{ request.status }}).</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
