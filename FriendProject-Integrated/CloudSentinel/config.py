@@ -30,6 +30,10 @@ class Config:
     LOCKDOWN_WINDOW_MINUTES = 10
 
     OTP_VALID_SECONDS = 120
+    BOOKSTREAM_USER_OTP_VALID_SECONDS = int(os.environ.get("BOOKSTREAM_USER_OTP_VALID_SECONDS", "120"))
+    BOOKSTREAM_ADMIN_OTP_VALID_SECONDS = int(os.environ.get("BOOKSTREAM_ADMIN_OTP_VALID_SECONDS", "600"))
+    BOOKSTREAM_OTP_RESEND_SECONDS = int(os.environ.get("BOOKSTREAM_OTP_RESEND_SECONDS", "120"))
+    BOOKSTREAM_OTP_MAX_RESENDS = int(os.environ.get("BOOKSTREAM_OTP_MAX_RESENDS", "3"))
 
     # ---- Email (OTP delivery) ----
     # For a Gmail account: enable 2-Step Verification, then create an

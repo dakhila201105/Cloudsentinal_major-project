@@ -20,8 +20,8 @@ from security.risk_engine import compute_risk
 from security.honeypot import trigger_high_risk_response, check_auto_lockdown
 from security.mailer import send_login_otp, send_new_device_approval, send_admin_alert, send_denial_notice, send_access_request_alert
 from security.dual_approval import generate_otp, write_audit_log, is_ip_blocked, record_denial_and_escalate, generate_approval_code, hash_approval_code, verify_approval_code, extract_browser_info
-from integration import bp as integration_bp
-from integration_models import IntegrationAccessRequest
+from integration import bp as integration_bp, _expire_bookstream_request
+from integration_models import IntegrationAccessRequest, SecuritySession
 
 MODELS = {
     "ThreatLog": ThreatLog, "BlockedIP": BlockedIP,
@@ -46,6 +46,23 @@ def create_app():
         if "request_type" not in {column["name"] for column in inspect(db.engine).get_columns("integration_access_requests")}:
             db.session.execute(text("ALTER TABLE integration_access_requests ADD COLUMN request_type VARCHAR(40) NOT NULL DEFAULT 'RISK_REVIEW'"))
             db.session.commit()
+        access_request_columns = {column["name"] for column in inspect(db.engine).get_columns("integration_access_requests")}
+        access_request_migrations = {
+            "user_otp_hash": "VARCHAR(64)",
+            "user_otp_expires_at": "DATETIME",
+            "challenge_expires_at": "DATETIME",
+            "user_otp_last_sent_at": "DATETIME",
+            "user_otp_attempts": "INTEGER NOT NULL DEFAULT 0",
+            "user_otp_resends": "INTEGER NOT NULL DEFAULT 0",
+            "user_verified_at": "DATETIME",
+            "admin_otp_hash": "VARCHAR(64)",
+            "admin_otp_expires_at": "DATETIME",
+            "admin_otp_attempts": "INTEGER NOT NULL DEFAULT 0",
+        }
+        for column_name, column_type in access_request_migrations.items():
+            if column_name not in access_request_columns:
+                db.session.execute(text(f"ALTER TABLE integration_access_requests ADD COLUMN {column_name} {column_type}"))
+        db.session.commit()
         if SystemState.query.first() is None:
             db.session.add(SystemState(lockdown=False))
         if ReplicaStatus.query.first() is None:
@@ -549,8 +566,22 @@ def register_routes(app):
             flash("Administrator access required.", "danger")
             return redirect(url_for("dashboard"))
         pending = AccessRequest.query.filter_by(status="PENDING").order_by(AccessRequest.created_at.desc()).all()
-        bookstream_pending = IntegrationAccessRequest.query.filter_by(status="PENDING").order_by(IntegrationAccessRequest.created_at.desc()).all()
-        return render_template("admin_pending_requests.html", requests=pending, bookstream_requests=bookstream_pending)
+        for expired_request in IntegrationAccessRequest.query.filter_by(request_type="BOOKSTREAM_DUAL_APPROVAL").filter(
+            IntegrationAccessRequest.status.in_(["PENDING_USER", "PENDING"])
+        ).all():
+            _expire_bookstream_request(expired_request)
+        bookstream_pending = IntegrationAccessRequest.query.filter_by(status="PENDING", request_type="FROZEN_ACCOUNT_LOGIN").order_by(IntegrationAccessRequest.created_at.desc()).all()
+        bookstream_login_requests = IntegrationAccessRequest.query.filter_by(status="PENDING", request_type="BOOKSTREAM_DUAL_APPROVAL").filter(
+            (IntegrationAccessRequest.admin_otp_expires_at.is_(None)) | (IntegrationAccessRequest.admin_otp_expires_at > datetime.utcnow())
+        ).order_by(IntegrationAccessRequest.created_at.desc()).all()
+        active_cutoff = datetime.utcnow() - timedelta(seconds=120)
+        bookstream_active_sessions = {
+            item.request_id: SecuritySession.query.filter_by(bookstream_user_id=item.bookstream_user_id, status="ACTIVE").filter(SecuritySession.last_activity >= active_cutoff).count()
+            for item in bookstream_login_requests
+        }
+        return render_template("admin_pending_requests.html", requests=pending, bookstream_requests=bookstream_pending,
+                               bookstream_login_requests=bookstream_login_requests,
+                               bookstream_active_sessions=bookstream_active_sessions)
 
     @app.route("/admin/pending-requests/<int:request_id>", methods=["GET", "POST"])
     @login_required

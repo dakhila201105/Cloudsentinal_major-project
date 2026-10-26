@@ -4,7 +4,7 @@ const axios = require('axios');
 const baseURL = process.env.CLOUDSENTINEL_URL || 'http://127.0.0.1:8000';
 const serviceKey = process.env.CLOUDSENTINEL_SERVICE_KEY || 'dev-integration-key';
 
-const fingerprint = (req) => crypto.createHash('sha256').update(`${req.headers['user-agent'] || ''}|${req.headers['accept-language'] || ''}`).digest('hex').slice(0, 32);
+const fingerprint = (req) => crypto.createHash('sha256').update(`${req.headers['x-bookstream-device-id'] || ''}|${req.headers['user-agent'] || ''}|${req.headers['accept-language'] || ''}`).digest('hex').slice(0, 32);
 const context = (req) => ({
   ip_address: req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || '127.0.0.1',
   user_agent: req.headers['user-agent'] || '',
@@ -19,6 +19,15 @@ async function registerUser(user) {
 }
 async function evaluateLogin(user, req) {
   return axios.post(`${baseURL}/api/integration/login-evaluate`, { bookstream_user_id: String(user._id), ...context(req) }, { headers: headers(), timeout: 7000, validateStatus: s => s < 500 });
+}
+async function startDualApproval(user, req) {
+  return axios.post(`${baseURL}/api/integration/bookstream/login/start`, { bookstream_user_id: String(user._id), ...context(req) }, { headers: headers(), timeout: 7000, validateStatus: s => s < 500 });
+}
+async function verifyBookStreamUserOtp(requestId, code) {
+  return axios.post(`${baseURL}/api/integration/bookstream/login/${encodeURIComponent(requestId)}/verify-user`, { code }, { headers: headers(), timeout: 7000, validateStatus: s => s < 500 });
+}
+async function resendBookStreamUserOtp(requestId) {
+  return axios.post(`${baseURL}/api/integration/bookstream/login/${encodeURIComponent(requestId)}/resend-user`, {}, { headers: headers(), timeout: 7000, validateStatus: s => s < 500 });
 }
 async function accessStatus(requestId) {
   return axios.post(`${baseURL}/api/integration/access-request/${requestId}/status`, {}, { headers: headers(), timeout: 5000 });
@@ -45,4 +54,4 @@ async function event(user, req, eventType, data={}) {
     return null;
   }
 }
-module.exports = { registerUser, evaluateLogin, accessStatus, validateSession, revokeSession, startSession, event, context };
+module.exports = { registerUser, evaluateLogin, startDualApproval, verifyBookStreamUserOtp, resendBookStreamUserOtp, accessStatus, validateSession, revokeSession, startSession, event, context };

@@ -143,7 +143,7 @@ pip install -r requirements.txt
 python3 app.py
 ```
 
-Open **http://127.0.0.1:5000** in your browser.
+Open **http://127.0.0.1:5001** in your browser.
 
 The database, tables, and a default admin account are created
 automatically on first run:

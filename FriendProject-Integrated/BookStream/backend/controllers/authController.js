@@ -97,13 +97,29 @@ const login = async (req, res) => {
         }
         return res.status(403).json({ code: 'ACCOUNT_RESTRICTED', message: 'Your BookStream account is frozen, so you have been signed out. Please contact the BookStream administrator if you believe this is a mistake. Your account will remain blocked until an administrator reviews it.' });
       }
-      // Keep the local email/password check authoritative. Sync the identity
-      // before recording login so later activity can be associated with it.
-      let securitySessionId;
-      try { await cloudSentinel.registerUser(user); securitySessionId = await cloudSentinel.startSession(user, req); }
-      catch (error) { console.error('CloudSentinel session start failed:', error.response?.data || error.message); }
-      await cloudSentinel.event(user, req, 'LOGIN', { session_id: securitySessionId });
-      return res.json({ _id:user._id, firstName:user.firstName, lastName:user.lastName, email:user.email, role:user.role, security_session_id:securitySessionId, token:generateToken(user._id, securitySessionId) });
+      // Password verification is only the start of sign-in. No BookStream
+      // token/session is issued until the user email OTP and CloudSentinel admin
+      // approval have both completed.
+      try {
+        await cloudSentinel.registerUser(user);
+        const challenge = await cloudSentinel.startDualApproval(user, req);
+        if (challenge.status === 202 && challenge.data?.request_id) {
+          return res.status(202).json({ ...challenge.data, step: 'USER_OTP_REQUIRED' });
+        }
+        if (challenge.status === 403 && user.status !== 'ACTIVE') {
+          return res.status(403).json({ code: 'ACCOUNT_RESTRICTED', message: challenge.data?.message || 'Your BookStream account is frozen. Please contact the BookStream administrator.' });
+        }
+        const challengeMessage = challenge.data?.message || `CloudSentinel returned HTTP ${challenge.status} without an OTP challenge.`;
+        console.error('CloudSentinel returned an incomplete sign-in challenge:', {
+          status: challenge.status,
+          responseFields: Object.keys(challenge.data || {}),
+          hasRequestId: Boolean(challenge.data?.request_id),
+        });
+        return res.status(challenge.status >= 400 ? challenge.status : 503).json({ message: challengeMessage });
+      } catch (error) {
+        console.error('BookStream dual-approval start failed:', error.response?.data || error.message);
+        return res.status(503).json({ message: 'CloudSentinel is unavailable. Sign-in was not completed; please try again shortly.' });
+      }
     } else {
       if (user) cloudSentinel.event(user, req, 'LOGIN_FAILED').catch(() => {});
       res.status(401).json({ message: 'Invalid email or password' });
@@ -111,6 +127,28 @@ const login = async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+const verifyLoginOtp = async (req, res) => {
+  const code = typeof req.body.code === 'string' ? req.body.code.trim() : '';
+  if (!/^\d{6}$/.test(code)) return res.status(400).json({ message: 'Enter the six-digit code from your BookStream email.' });
+  try {
+    const result = await cloudSentinel.verifyBookStreamUserOtp(req.params.requestId, code);
+    return res.status(result.status).json(result.data);
+  } catch (error) {
+    console.error('BookStream email OTP verification failed:', error.response?.data || error.message);
+    return res.status(503).json({ message: 'CloudSentinel is unavailable. Please try again shortly.' });
+  }
+};
+
+const resendLoginOtp = async (req, res) => {
+  try {
+    const result = await cloudSentinel.resendBookStreamUserOtp(req.params.requestId);
+    return res.status(result.status).json(result.data);
+  } catch (error) {
+    console.error('BookStream email OTP resend failed:', error.response?.data || error.message);
+    return res.status(503).json({ message: 'The code could not be resent. Please try again shortly.' });
   }
 };
 
@@ -153,6 +191,8 @@ module.exports = {
   logout,
   securityRequestStatus,
   completeSecurityRequest,
+  verifyLoginOtp,
+  resendLoginOtp,
   login,
   getMe,
 };

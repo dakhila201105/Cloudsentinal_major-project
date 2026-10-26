@@ -29,6 +29,37 @@
   </div>
 </div>
 <div class="card cs-card p-3 mt-4">
+  <h5>BookStream Sign-In Approvals</h5>
+  <p class="small text-muted">Only users who verified the OTP sent to their registered email appear here. Review the device ID and active sessions. Approval requires the request-bound code sent to the administrator email.</p>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover">
+      <thead><tr><th>Requested</th><th>User</th><th>IP / Risk</th><th>Device ID</th><th>Active sessions</th><th>Admin code / decision</th></tr></thead>
+      <tbody>
+        {% for req in bookstream_login_requests %}
+        <tr>
+          <td class="small">{{ req.created_at.strftime('%Y-%m-%d %H:%M:%S') }}<br><span class="badge bg-info text-dark">EMAIL VERIFIED</span></td>
+          <td>{{ req.username }}<br><small>{{ req.email }}</small></td>
+          <td class="small">{{ req.ip_address }}<br><span class="badge bg-warning text-dark">{{ req.risk_level }} · {{ '%.1f'|format(req.risk_score) }}/100</span></td>
+          <td class="small"><code>{{ req.device_fingerprint or 'Unavailable' }}</code><br><a href="{{ url_for('integration.security_user_page', user_id=req.bookstream_user_id) }}">Review user sessions</a></td>
+          <td>
+            {% set active_count = bookstream_active_sessions.get(req.request_id, 0) %}
+            <span class="badge bg-{{ 'danger' if active_count else 'success' }}">{{ active_count }} active</span>
+            {% if active_count %}<div class="small text-muted mt-1">Different active device must be revoked before approval.</div>{% endif %}
+          </td>
+          <td class="text-nowrap">
+            <input id="bookstream-admin-code-{{ req.request_id }}" class="form-control form-control-sm mb-2" type="text" inputmode="text" autocomplete="one-time-code" maxlength="8" placeholder="8-character email code">
+            <button class="btn btn-sm btn-success" onclick="reviewBookStreamLogin('{{ req.request_id }}','APPROVE')">Approve</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="reviewBookStreamLogin('{{ req.request_id }}','DENY')">Deny</button>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-center text-muted">No email-verified BookStream sign-ins are waiting for administrator approval.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<div class="card cs-card p-3 mt-4">
   <h5>BookStream Frozen Account Sign-In Reviews</h5>
   <p class="small text-muted">Review verified sign-in attempts from frozen accounts. Unfreezing restores BookStream access; keeping the account frozen denies the attempt.</p>
   <div class="table-responsive">
@@ -58,6 +89,16 @@
 async function reviewBookStream(requestId, decision) {
   const result = await fetch('/api/admin/integration/approval/' + encodeURIComponent(requestId), {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({decision})
+  });
+  const data = await result.json();
+  if (!result.ok) { alert(data.message || 'Unable to record the decision.'); return; }
+  window.location.reload();
+}
+async function reviewBookStreamLogin(requestId, decision) {
+  const code = document.getElementById('bookstream-admin-code-' + requestId)?.value.trim() || '';
+  if (decision === 'APPROVE' && !code) { alert('Enter the administrator code from the email before approving.'); return; }
+  const result = await fetch('/api/admin/integration/approval/' + encodeURIComponent(requestId), {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({decision, admin_code: code})
   });
   const data = await result.json();
   if (!result.ok) { alert(data.message || 'Unable to record the decision.'); return; }

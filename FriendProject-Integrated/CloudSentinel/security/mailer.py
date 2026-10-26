@@ -10,19 +10,27 @@ dependency required):
   3. Admin alert + OTP    -> sent to the fixed administrator inbox, with
                              full context of the suspicious login attempt
 
-Every function returns (success: bool, message: str) and never raises —
-if mail isn't configured or sending fails, the app falls back to
-showing the code on screen so the demo keeps working end to end.
+Every function returns (success: bool, message: str) and never raises.
+The integrated BookStream dual-approval routes fail closed if mail delivery
+is unavailable; they never return an OTP in an API response or show it on screen.
 """
 
 import smtplib
 import ssl
+from html import escape
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 
+def _setting(cfg, name, default=None):
+    """Read settings from Flask's mapping config or a plain config object."""
+    if hasattr(cfg, "get"):
+        return cfg.get(name, default)
+    return getattr(cfg, name, default)
+
+
 def _mail_ready(cfg):
-    return bool(cfg.MAIL_USERNAME and cfg.MAIL_PASSWORD)
+    return bool(_setting(cfg, "MAIL_USERNAME") and _setting(cfg, "MAIL_PASSWORD"))
 
 
 def _send(cfg, to_address, subject, text, html):
@@ -33,17 +41,18 @@ def _send(cfg, to_address, subject, text, html):
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = f"{cfg.MAIL_SENDER_NAME} <{cfg.MAIL_USERNAME}>"
+    mail_username = _setting(cfg, "MAIL_USERNAME")
+    msg["From"] = f"{_setting(cfg, 'MAIL_SENDER_NAME', 'CloudSentinel Security')} <{mail_username}>"
     msg["To"] = to_address
     msg.attach(MIMEText(text, "plain"))
     msg.attach(MIMEText(html, "html"))
 
     try:
         context = ssl.create_default_context()
-        with smtplib.SMTP(cfg.MAIL_SERVER, cfg.MAIL_PORT) as server:
+        with smtplib.SMTP(_setting(cfg, "MAIL_SERVER", "smtp.gmail.com"), int(_setting(cfg, "MAIL_PORT", 587))) as server:
             server.starttls(context=context)
-            server.login(cfg.MAIL_USERNAME, cfg.MAIL_PASSWORD)
-            server.sendmail(cfg.MAIL_USERNAME, [to_address], msg.as_string())
+            server.login(mail_username, _setting(cfg, "MAIL_PASSWORD"))
+            server.sendmail(mail_username, [to_address], msg.as_string())
         return True, f"Email sent to {to_address}."
     except Exception as exc:
         return False, f"Failed to send email: {exc}"
@@ -57,7 +66,7 @@ def _code_html(heading, code, body_html, cfg):
       <p style="font-size:28px;font-weight:bold;letter-spacing:4px;
                 background:#111c34;color:#fff;padding:12px 20px;
                 border-radius:8px;display:inline-block;">{code}</p>
-      <p>This code expires in {cfg.OTP_VALID_SECONDS // 60} minutes.</p>
+      <p>This code expires in {int(_setting(cfg, 'OTP_VALID_SECONDS', 120)) // 60} minutes.</p>
       <p style="color:#64748b;font-size:12px;">CloudSentinel automated security notice.</p>
     </div>
     """
@@ -69,7 +78,7 @@ def send_login_otp(cfg, user, otp_code):
     text = (
         f"Hi {user.username},\n\n"
         f"Your login verification code is: {otp_code}\n"
-        f"It expires in {cfg.OTP_VALID_SECONDS // 60} minutes.\n\n"
+        f"It expires in {int(_setting(cfg, 'OTP_VALID_SECONDS', 120)) // 60} minutes.\n\n"
         f"If you didn't request this, you can ignore this email."
     )
     html = _code_html(
@@ -91,7 +100,7 @@ def send_new_device_approval(cfg, user, otp_code, ip, location, device_summary):
         f"  Location:   {location}\n"
         f"  Device:     {device_summary}\n\n"
         f"If this was you, approve it by entering this code: {otp_code}\n"
-        f"It expires in {cfg.OTP_VALID_SECONDS // 60} minutes.\n\n"
+        f"It expires in {int(_setting(cfg, 'OTP_VALID_SECONDS', 120)) // 60} minutes.\n\n"
         f"If this WASN'T you, do not share this code — the request will simply expire."
     )
     html = _code_html(
@@ -119,7 +128,7 @@ def send_admin_alert(cfg, otp_code, details: dict):
         f"A new-device login is awaiting administrator approval.\n\n"
         f"{text_rows}\n\n"
         f"Administrator approval code: {otp_code}\n"
-        f"It expires in {cfg.OTP_VALID_SECONDS // 60} minutes.\n\n"
+        f"It expires in {int(_setting(cfg, 'OTP_VALID_SECONDS', 120)) // 60} minutes.\n\n"
         f"Review it on the Security Dashboard under Pending Approvals."
     )
     html = _code_html(
@@ -128,7 +137,7 @@ def send_admin_alert(cfg, otp_code, details: dict):
         f"<p>A new-device login is awaiting your approval:</p><ul>{rows}</ul>",
         cfg,
     )
-    return _send(cfg, cfg.ADMIN_NOTIFY_EMAIL, subject, text, html)
+    return _send(cfg, _setting(cfg, "ADMIN_NOTIFY_EMAIL", ""), subject, text, html)
 
 
 def send_denial_notice(cfg, user, reason):
@@ -160,7 +169,7 @@ def send_access_request_alert(cfg, approval_code, details: dict):
         f"A new access request is awaiting administrator approval.\n\n"
         f"{text_rows}\n\n"
         f"Administrator approval code: {approval_code}\n"
-        f"It expires in {cfg.OTP_VALID_SECONDS // 60} minutes.\n\n"
+        f"It expires in {int(_setting(cfg, 'OTP_VALID_SECONDS', 120)) // 60} minutes.\n\n"
         f"Review it on the Security Dashboard under Pending Requests."
     )
     html = _code_html(
@@ -169,4 +178,47 @@ def send_access_request_alert(cfg, approval_code, details: dict):
         f"<p>A new access request is awaiting your approval:</p><ul>{rows}</ul>",
         cfg,
     )
-    return _send(cfg, cfg.ADMIN_NOTIFY_EMAIL, subject, text, html)
+    return _send(cfg, _setting(cfg, "ADMIN_NOTIFY_EMAIL", ""), subject, text, html)
+
+
+def send_bookstream_login_otp(cfg, identity, otp_code):
+    """Send BookStream's first-factor login code to the registered address."""
+    name = escape(identity.username or "BookStream reader")
+    subject = "BookStream — sign-in verification code"
+    ttl = int(_setting(cfg, "BOOKSTREAM_USER_OTP_VALID_SECONDS", _setting(cfg, "OTP_VALID_SECONDS", 120))) // 60
+    text = (
+        f"Hi {identity.username or 'reader'},\n\n"
+        f"Your BookStream sign-in verification code is: {otp_code}\n"
+        f"It expires in {ttl} minute(s). If you did not request this, ignore this email."
+    )
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:520px;margin:auto">
+      <h2 style="color:#2563eb">BookStream sign-in verification</h2>
+      <p>Hi <strong>{name}</strong>, enter this code in BookStream to continue signing in.</p>
+      <p style="font-size:28px;font-weight:bold;letter-spacing:4px;background:#111c34;color:#fff;padding:12px 20px;border-radius:8px;display:inline-block">{escape(otp_code)}</p>
+      <p>This code expires in {ttl} minute(s). Never share it with anyone.</p>
+    </div>"""
+    return _send(cfg, identity.email, subject, text, html)
+
+
+def send_bookstream_admin_otp(cfg, otp_code, details: dict):
+    """Notify the CloudSentinel administrator and deliver the request-bound approval code."""
+    rows = "".join(f"<li><strong>{escape(str(key))}:</strong> {escape(str(value))}</li>" for key, value in details.items())
+    text_rows = "\n".join(f"  {key}: {value}" for key, value in details.items())
+    ttl = int(_setting(cfg, "BOOKSTREAM_ADMIN_OTP_VALID_SECONDS", 600)) // 60
+    subject = "CloudSentinel — BookStream sign-in requires review"
+    text = (
+        f"A BookStream user verified the OTP sent to their registered email and is waiting for your decision.\n\n"
+        f"{text_rows}\n\nAdministrator approval code: {otp_code}\n"
+        f"This request-bound code expires in {ttl} minute(s). Review the request in CloudSentinel Pending Access Requests."
+    )
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto">
+      <h2 style="color:#b45309">BookStream sign-in requires administrator review</h2>
+      <p>The user verified the code sent to their registered email. Review the user and device before approving.</p>
+      <ul>{rows}</ul>
+      <p>Request-bound administrator code:</p>
+      <p style="font-size:28px;font-weight:bold;letter-spacing:4px;background:#111c34;color:#fff;padding:12px 20px;border-radius:8px;display:inline-block">{escape(otp_code)}</p>
+      <p>This code expires in {ttl} minute(s). It can approve only this request.</p>
+    </div>"""
+    return _send(cfg, _setting(cfg, "ADMIN_NOTIFY_EMAIL", ""), subject, text, html)

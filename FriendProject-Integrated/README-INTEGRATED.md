@@ -5,17 +5,18 @@ This package connects the existing BookStream MERN application to the existing C
 ## Services
 
 - CloudSentinel: `http://127.0.0.1:8000`
-- BookStream backend: `http://127.0.0.1:5000`
+- BookStream backend: `http://127.0.0.1:5001`
 - BookStream frontend: `http://localhost:3000`
 - MongoDB: `mongodb://127.0.0.1:27017/bookstream`
 
 ## Integration implemented
 
 - BookStream registration creates a CloudSentinel security identity.
-- BookStream login is evaluated by CloudSentinel before a JWT is issued.
-- LOW risk creates a CloudSentinel security session and allows login.
-- MEDIUM risk creates a pending administrator access request.
-- HIGH/CRITICAL login risk is blocked and recorded as a threat.
+- BookStream login first verifies the registered email with a one-time code; a new code can be requested after two minutes.
+- After email verification, every BookStream login waits for CloudSentinel administrator approval and a request-bound code emailed to the admin.
+- User codes expire after two minutes; the request-bound admin code expires after ten minutes. Both are single-use, attempt-limited, and stored as keyed hashes.
+- CloudSentinel records the requesting device ID and active sessions; approving a different device is blocked until the current active session is revoked.
+- BookStream issues a JWT only after both approvals; each account has one active BookStream session at a time.
 - Every protected BookStream request validates the CloudSentinel security session.
 - Logout records an event and revokes the security session.
 - Book views, searches, PDF downloads, bookmarks, ratings and admin book actions generate security telemetry.
@@ -42,6 +43,8 @@ pip install -r requirements.txt
 
 Copy `.env.example` values into your environment. Use the same `CLOUDSENTINEL_SERVICE_KEY` in both projects.
 
+Copy `.env.example` to `.env` and configure the SMTP sender credentials plus the administrator email. The local launcher loads this file and the BookStream backend `.env` (shell environment variables take precedence except that the shared service key is taken from BookStream's `.env`). Real email is required; codes are never displayed as a development fallback.
+
 Start the integrated local service with the shared BookStream key:
 
 ```powershell
@@ -64,7 +67,7 @@ Create `.env`:
 ```env
 MONGODB_URI=mongodb://127.0.0.1:27017/bookstream
 JWT_SECRET=replace-with-a-long-random-secret
-PORT=5000
+PORT=5001
 CLOUDSENTINEL_URL=http://127.0.0.1:8000
 CLOUDSENTINEL_SERVICE_KEY=the-same-service-key
 ```

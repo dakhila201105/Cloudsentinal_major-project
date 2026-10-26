@@ -46,6 +46,19 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     try {
       const response = await authAPI.login({ email, password });
+      if (response.data?.step === 'USER_OTP_REQUIRED' && response.data?.request_id) {
+        return {
+          success: false,
+          verificationRequired: true,
+          requestId: response.data.request_id,
+          email: response.data.email,
+          resendAfterSeconds: response.data.resend_after_seconds,
+          otpValidSeconds: response.data.otp_valid_seconds,
+        };
+      }
+      if (response.status === 202 && response.data?.request_id) {
+        return { success: false, pending: true, requestId: response.data.request_id, message: response.data.message || 'Administrator approval required' };
+      }
       const { token, ...userData } = response.data;
 
       localStorage.setItem('token', token);

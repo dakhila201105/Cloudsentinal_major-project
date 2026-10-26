@@ -1,7 +1,19 @@
 import axios from 'axios';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
 const ASSET_BASE_URL = API_URL.replace(/\/api\/?$/, '').replace(/\/+$/, '');
+const DEVICE_ID_KEY = 'bookstreamDeviceId';
+
+const getBookStreamDeviceId = () => {
+  let deviceId = localStorage.getItem(DEVICE_ID_KEY);
+  if (!deviceId) {
+    deviceId = window.crypto?.randomUUID
+      ? window.crypto.randomUUID()
+      : `bs-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+    localStorage.setItem(DEVICE_ID_KEY, deviceId);
+  }
+  return deviceId;
+};
 
 export const assetURL = (filePath) => {
   if (!filePath) return '';
@@ -24,6 +36,7 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    config.headers['X-BookStream-Device-ID'] = getBookStreamDeviceId();
     return config;
   },
   (error) => {
@@ -56,6 +69,8 @@ api.interceptors.response.use(
 export const authAPI = {
   register: (userData) => api.post('/auth/register', userData),
   login: (userData) => api.post('/auth/login', userData),
+  verifyLoginOtp: (requestId, code) => api.post(`/auth/dual-approval/${encodeURIComponent(requestId)}/verify-user`, { code }),
+  resendLoginOtp: (requestId) => api.post(`/auth/dual-approval/${encodeURIComponent(requestId)}/resend-user`),
   getMe: () => api.get('/auth/me'),
   logout: () => api.post('/auth/logout'),
   securityRequestStatus: (requestId) => api.get(`/auth/security-request/${requestId}`),

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { FiMail, FiLock, FiUser, FiEye, FiEyeOff } from 'react-icons/fi';
@@ -18,12 +18,108 @@ const AuthPage = () => {
     password: '',
   });
   const [errors, setErrors] = useState({});
+  const [dualApproval, setDualApproval] = useState(null);
+  const [emailOtp, setEmailOtp] = useState('');
+  const [otpMessage, setOtpMessage] = useState('');
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [clock, setClock] = useState(Date.now());
+  const pollTimer = useRef(null);
 
   const { login, register } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
   const from = location.state?.from?.pathname || '/books';
+
+  useEffect(() => {
+    if (dualApproval?.step !== 'USER_OTP') return undefined;
+    const timer = window.setInterval(() => setClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [dualApproval?.step]);
+
+  useEffect(() => () => window.clearTimeout(pollTimer.current), []);
+
+  const waitForAdmin = (requestId) => {
+    const started = Date.now();
+    const poll = async () => {
+      try {
+        const response = await authAPI.securityRequestStatus(requestId);
+        if (response.data.status === 'APPROVED' && response.data.security_session_id) {
+          const completed = await authAPI.completeSecurityRequest(requestId);
+          const { token, ...userData } = completed.data;
+          localStorage.setItem('token', token);
+          localStorage.setItem('user', JSON.stringify(userData));
+          window.location.href = from;
+          return;
+        }
+        if (response.data.status === 'DENIED') {
+          setOtpMessage(response.data.message || 'The administrator denied this sign-in. Contact the BookStream administrator if you think this is a mistake.');
+          setDualApproval((current) => current ? { ...current, step: 'DONE' } : current);
+          return;
+        }
+        if (Date.now() - started < 15 * 60 * 1000) {
+          pollTimer.current = window.setTimeout(poll, 2500);
+        } else {
+          setOtpMessage('This administrator review timed out. Please sign in again.');
+          setDualApproval((current) => current ? { ...current, step: 'DONE' } : current);
+        }
+      } catch (error) {
+        if (Date.now() - started < 15 * 60 * 1000) pollTimer.current = window.setTimeout(poll, 4000);
+        else {
+          setOtpMessage('We could not confirm the administrator decision. Please sign in again.');
+          setDualApproval((current) => current ? { ...current, step: 'DONE' } : current);
+        }
+      }
+    };
+    pollTimer.current = window.setTimeout(poll, 1500);
+  };
+
+  const verifyEmailOtp = async (event) => {
+    event.preventDefault();
+    setOtpLoading(true);
+    setOtpMessage('');
+    try {
+      const response = await authAPI.verifyLoginOtp(dualApproval.requestId, emailOtp);
+      if (response.data?.status === 'PENDING' && response.data?.step === 'ADMIN_APPROVAL') {
+        setDualApproval((current) => ({ ...current, step: 'ADMIN_PENDING' }));
+        setEmailOtp('');
+        setOtpMessage('Email verified. Your request is now waiting for CloudSentinel administrator approval.');
+        waitForAdmin(dualApproval.requestId);
+      } else {
+        setOtpMessage(response.data?.message || 'Email verification did not complete.');
+      }
+    } catch (error) {
+      setOtpMessage(error.response?.data?.message || 'Could not verify that code. Please try again.');
+      if (error.response?.data?.status === 'DENIED') setDualApproval((current) => ({ ...current, step: 'DONE' }));
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const resendEmailOtp = async () => {
+    setOtpLoading(true);
+    setOtpMessage('');
+    try {
+      const response = await authAPI.resendLoginOtp(dualApproval.requestId);
+      const delay = Number(response.data?.resend_after_seconds || 120);
+      setDualApproval((current) => ({ ...current, resendAt: Date.now() + delay * 1000 }));
+      setEmailOtp('');
+      setOtpMessage(response.data?.message || 'A new code was sent to your registered email.');
+    } catch (error) {
+      setOtpMessage(error.response?.data?.message || 'Could not send another code.');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const restartSignIn = () => {
+    window.clearTimeout(pollTimer.current);
+    setDualApproval(null);
+    setEmailOtp('');
+    setOtpMessage('');
+    setErrors({});
+    setFormData((current) => ({ ...current, password: '' }));
+  };
 
   const handleChange = (e) => {
     setFormData({
@@ -97,6 +193,12 @@ const AuthPage = () => {
         result = await login(formData.email, formData.password);
         if (result.success) {
           navigate(from, { replace: true });
+        } else if (result.verificationRequired) {
+          setErrors({});
+          setEmailOtp('');
+          setOtpMessage('');
+          setDualApproval({ step: 'USER_OTP', requestId: result.requestId, email: result.email,
+            resendAt: Date.now() + Number(result.resendAfterSeconds || 120) * 1000 });
         } else if (result.pending) {
           setErrors({ submit: 'Your BookStream account is frozen. This sign-in attempt has been sent to the administrator for review. Please contact the BookStream administrator if you believe this is a mistake. Repeated sign-in attempts increase the account risk score.' });
           const started = Date.now();
@@ -143,10 +245,16 @@ const AuthPage = () => {
         <div className="card animate-fade-in">
           <div className="text-center mb-8">
             <h2 className="text-3xl font-bold text-gray-900">
-              {isSignUp ? 'Create Account' : 'Sign In'}
+              {dualApproval ? (dualApproval.step === 'USER_OTP' ? 'Verify your email' : dualApproval.step === 'ADMIN_PENDING' ? 'Waiting for administrator approval' : 'Sign-in request complete') : (isSignUp ? 'Create Account' : 'Sign In')}
             </h2>
             <p className="text-gray-600 mt-2">
-              {isSignUp
+              {dualApproval?.step === 'USER_OTP'
+                ? `Enter the six-digit code sent to ${dualApproval.email}.`
+                : dualApproval?.step === 'ADMIN_PENDING'
+                  ? 'Your email is verified. CloudSentinel is waiting for an administrator to review this device and approve access.'
+                  : dualApproval?.step === 'DONE'
+                    ? 'This sign-in could not be approved.'
+                    : isSignUp
                 ? 'Join BookStream and start your reading journey'
                 : 'Welcome back! Please sign in to your account'
               }
@@ -154,6 +262,7 @@ const AuthPage = () => {
           </div>
 
           {restrictedNotice && <div role="alert" className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-lg mb-4">{restrictedNotice}</div>}
+          {!dualApproval ? (
           <form onSubmit={handleSubmit} className="space-y-6">
             {isSignUp && (
               <div className="grid grid-cols-2 gap-4">
@@ -271,8 +380,46 @@ const AuthPage = () => {
               )}
             </button>
           </form>
+          ) : (
+            <div className="space-y-5">
+              {dualApproval.step === 'USER_OTP' && (
+                <form onSubmit={verifyEmailOtp} className="space-y-4">
+                  <div>
+                    <label htmlFor="emailOtp" className="block text-sm font-medium text-gray-700 mb-1">Email verification code</label>
+                    <input id="emailOtp" name="emailOtp" type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6}
+                      value={emailOtp} onChange={(event) => setEmailOtp(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                      className="input-field text-center tracking-[0.4em] text-lg" placeholder="000000" required />
+                    <p className="text-xs text-gray-500 mt-2">The code expires in two minutes. If it expires, you can request a new one after the timer.</p>
+                  </div>
+                  {otpMessage && <div role="status" className="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-3 rounded-lg">{otpMessage}</div>}
+                  <button type="submit" disabled={otpLoading || emailOtp.length !== 6} className="w-full btn-primary disabled:opacity-50 py-3">
+                    {otpLoading ? 'Verifying…' : 'Verify email and continue'}
+                  </button>
+                  {Math.max(0, Math.ceil((dualApproval.resendAt - clock) / 1000)) > 0 ? (
+                    <p className="text-center text-sm text-gray-500">Request another code in {Math.max(0, Math.ceil((dualApproval.resendAt - clock) / 1000))} seconds</p>
+                  ) : (
+                    <button type="button" onClick={resendEmailOtp} disabled={otpLoading} className="w-full text-blue-600 hover:text-blue-700 font-medium disabled:opacity-50">
+                      {otpLoading ? 'Sending…' : 'Request a new code'}
+                    </button>
+                  )}
+                </form>
+              )}
+              {dualApproval.step === 'ADMIN_PENDING' && (
+                <div className="text-center py-5">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                  <p className="font-medium text-gray-800">Waiting for CloudSentinel</p>
+                  <p className="text-sm text-gray-600 mt-2">The administrator received your device ID and a request-specific approval code. You’ll be signed in here after approval.</p>
+                  {otpMessage && <div role="status" className="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-3 rounded-lg mt-4">{otpMessage}</div>}
+                </div>
+              )}
+              {dualApproval.step === 'DONE' && otpMessage && <div role="alert" className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-lg">{otpMessage}</div>}
+              {(dualApproval.step === 'USER_OTP' || dualApproval.step === 'DONE') && (
+                <button type="button" onClick={restartSignIn} className="w-full text-sm text-gray-600 hover:text-gray-900">Back to sign in</button>
+              )}
+            </div>
+          )}
 
-          <div className="mt-6 text-center">
+          {!dualApproval && <div className="mt-6 text-center">
             <button
               onClick={toggleMode}
               className="text-blue-600 hover:text-blue-700 font-medium transition duration-200"
@@ -282,9 +429,9 @@ const AuthPage = () => {
                 : "Don't have an account? Create Account"
               }
             </button>
-          </div>
+          </div>}
 
-          {!isSignUp && (
+          {!dualApproval && !isSignUp && (
             <div className="mt-4 p-4 bg-blue-50 rounded-lg">
               <p className="text-sm text-blue-800">
                 <strong>Admin Access:</strong> To create an admin account, register with an email ending in @admin.com

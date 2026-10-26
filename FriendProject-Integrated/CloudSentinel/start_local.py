@@ -6,6 +6,24 @@ from pathlib import Path
 
 PROJECT_DIR = Path(__file__).resolve().parent
 BOOKSTREAM_ENV = PROJECT_DIR.parent / "BookStream" / "backend" / ".env"
+LOCAL_ENV = PROJECT_DIR / ".env"
+
+
+def load_env_file(path, override_keys=()):
+    """Read KEY=VALUE config; selected local settings may override shell values."""
+    if not path.is_file():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key in override_keys:
+            os.environ[key] = value
+        elif key:
+            os.environ.setdefault(key, value)
 
 
 def read_service_key():
@@ -20,6 +38,9 @@ def read_service_key():
     raise RuntimeError("CLOUDSENTINEL_SERVICE_KEY is missing from BookStream backend/.env")
 
 
+load_env_file(LOCAL_ENV, override_keys={"CS_MAIL_USERNAME", "CS_MAIL_PASSWORD", "CS_ADMIN_EMAIL"})
+load_env_file(BOOKSTREAM_ENV)
+os.environ.setdefault("BOOKSTREAM_BACKEND_URL", f"http://127.0.0.1:{os.environ.get('PORT', '5001')}")
 os.environ["CLOUDSENTINEL_SERVICE_KEY"] = read_service_key()
 os.environ["PORT"] = "8000"
 

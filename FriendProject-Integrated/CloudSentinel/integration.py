@@ -1,4 +1,4 @@
-import json, secrets
+import hashlib, hmac, json, secrets
 from datetime import datetime, timedelta
 from functools import wraps
 import os, urllib.request, json, secrets
@@ -8,6 +8,7 @@ from models import User, AuditLog, ThreatLog
 from integration_models import SecurityIdentity, SecurityEvent, SecuritySession, IntegrationAccessRequest
 from security.risk_engine import compute_risk
 from security.zero_trust import simulate_geo_lookup
+from security.mailer import send_bookstream_admin_otp, send_bookstream_login_otp
 
 bp = Blueprint('integration', __name__)
 SESSION_PRESENCE_WINDOW = timedelta(seconds=120)
@@ -20,7 +21,7 @@ def _active_session_count(user_id=None):
 
 
 def _bookstream_request(path, method='GET', payload=None):
-    base=os.environ.get('BOOKSTREAM_BACKEND_URL','http://127.0.0.1:5000')
+    base=os.environ.get('BOOKSTREAM_BACKEND_URL','http://127.0.0.1:5001')
     req=urllib.request.Request(base+path, method=method, headers={'Content-Type':'application/json','X-CloudSentinel-Service-Key':os.environ.get('CLOUDSENTINEL_SERVICE_KEY','dev-integration-key')})
     if payload is not None: req.data=json.dumps(payload).encode()
     with urllib.request.urlopen(req, timeout=6) as resp: return json.loads(resp.read().decode())
@@ -67,6 +68,217 @@ def _event_metadata(event):
 
 def _audit(username, action, user_id, ip, device, risk, status):
     db.session.add(AuditLog(username=username, device_id=device or '-', browser='', ip_address=ip or '-', country=simulate_geo_lookup(ip or '127.0.0.1'), auth_status=status, risk_score=risk, admin_decision='N/A'))
+
+def _otp_hash(code):
+    from flask import current_app
+    secret = str(current_app.config.get('SECRET_KEY', '')).encode('utf-8')
+    return hmac.new(secret, code.encode('utf-8'), hashlib.sha256).hexdigest()
+
+def _masked_email(email):
+    local, sep, domain = (email or '').partition('@')
+    if not sep:
+        return 'your registered email'
+    return f"{local[:1]}{'*' * max(len(local)-1, 2)}@{domain}"
+
+def _expire_bookstream_request(access_request):
+    now = datetime.utcnow()
+    expired = (
+        access_request.request_type == 'BOOKSTREAM_DUAL_APPROVAL'
+        and access_request.status == 'PENDING_USER'
+        and access_request.challenge_expires_at
+        and access_request.challenge_expires_at <= now
+    ) or (
+        access_request.request_type == 'BOOKSTREAM_DUAL_APPROVAL'
+        and access_request.status == 'PENDING'
+        and access_request.admin_otp_expires_at
+        and access_request.admin_otp_expires_at <= now
+    )
+    if expired:
+        access_request.status = 'DENIED'
+        access_request.user_otp_hash = None
+        access_request.admin_otp_hash = None
+        access_request.decided_at = now
+        access_request.reasons = (access_request.reasons or '')[:700] + ' Sign-in challenge expired.'
+        _event(access_request.bookstream_user_id, 'LOGIN_CHALLENGE_EXPIRED', ip_address=access_request.ip_address,
+               device_fingerprint=access_request.device_fingerprint, user_agent=access_request.user_agent,
+               location=access_request.location, risk_score=access_request.risk_score,
+               risk_level=access_request.risk_level, action='EXPIRED', reason='BookStream dual-approval code expired')
+        db.session.commit()
+        return True
+    return False
+
+@bp.post('/api/integration/bookstream/login/start')
+@service_required
+def bookstream_login_start():
+    from flask import current_app
+    data = request.get_json(force=True) or {}
+    bid = str(data.get('bookstream_user_id', ''))
+    identity = SecurityIdentity.query.filter_by(bookstream_user_id=bid).first()
+    if not identity:
+        return jsonify({'message': 'BookStream security identity is not registered'}), 404
+    if identity.status != 'ACTIVE':
+        return jsonify({'message': 'Your BookStream account is frozen. Please contact the BookStream administrator.'}), 403
+    if not identity.email:
+        return jsonify({'message': 'No registered email is available for verification.'}), 400
+
+    now = datetime.utcnow()
+    recent_requests = IntegrationAccessRequest.query.filter_by(
+        bookstream_user_id=bid, request_type='BOOKSTREAM_DUAL_APPROVAL'
+    ).filter(IntegrationAccessRequest.created_at >= now - timedelta(minutes=15)).count()
+    if recent_requests >= 5:
+        return jsonify({'message': 'Too many sign-in code requests. Please wait 15 minutes before trying again.'}), 429
+    ip = data.get('ip_address') or '0.0.0.0'
+    fingerprint = str(data.get('device_fingerprint') or '')[:128]
+    user_agent = str(data.get('user_agent') or '')[:500]
+    score, level, reasons, anomaly, location = _risk_for(bid, ip, fingerprint, user_agent)
+    for previous in IntegrationAccessRequest.query.filter_by(bookstream_user_id=bid, request_type='BOOKSTREAM_DUAL_APPROVAL').filter(
+        IntegrationAccessRequest.status.in_(['PENDING_USER', 'PENDING'])
+    ).all():
+        previous.status = 'DENIED'
+        previous.user_otp_hash = None
+        previous.admin_otp_hash = None
+        previous.decided_at = now
+        previous.reasons = (previous.reasons or '')[:700] + ' Replaced by a newer sign-in attempt.'
+        _event(bid, 'LOGIN_CHALLENGE_SUPERSEDED', ip_address=previous.ip_address,
+               device_fingerprint=previous.device_fingerprint, user_agent=previous.user_agent,
+               location=previous.location, risk_score=previous.risk_score, risk_level=previous.risk_level,
+               action='SUPERSEDED', reason='Replaced by a newer BookStream sign-in request')
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    request_id = 'BS-' + secrets.token_urlsafe(32)
+    access_request = IntegrationAccessRequest(
+        request_id=request_id, bookstream_user_id=bid, username=identity.username, email=identity.email,
+        ip_address=ip, device_fingerprint=fingerprint, user_agent=user_agent, location=location,
+        risk_score=score, anomaly_score=anomaly, risk_level=level,
+        reasons='; '.join(reasons) or 'BookStream password verified; both approvals are required.',
+        request_type='BOOKSTREAM_DUAL_APPROVAL', status='PENDING_USER',
+        user_otp_hash=_otp_hash(code),
+        user_otp_expires_at=now + timedelta(seconds=current_app.config['BOOKSTREAM_USER_OTP_VALID_SECONDS']),
+        challenge_expires_at=now + timedelta(minutes=15), user_otp_last_sent_at=now,
+        user_otp_attempts=0, user_otp_resends=0,
+    )
+    db.session.add(access_request)
+    _event(bid, 'LOGIN_OTP_SENT', ip_address=ip, device_fingerprint=fingerprint, user_agent=user_agent,
+           location=location, risk_score=score, anomaly_score=anomaly, risk_level=level,
+           action='WAITING_FOR_USER', reason='BookStream sign-in code sent to the registered email')
+    db.session.commit()
+
+    sent, mail_error = send_bookstream_login_otp(current_app.config, identity, code)
+    if not sent:
+        print('BookStream sign-in OTP delivery failed:', mail_error)
+        access_request.status = 'DENIED'
+        access_request.user_otp_hash = None
+        access_request.decided_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify({'message': 'We could not send the sign-in code. Check the mail service configuration and try again.'}), 503
+    return jsonify({'request_id': request_id, 'status': 'PENDING_USER', 'step': 'USER_OTP',
+                    'email': _masked_email(identity.email),
+                    'otp_valid_seconds': current_app.config['BOOKSTREAM_USER_OTP_VALID_SECONDS'],
+                    'resend_after_seconds': current_app.config['BOOKSTREAM_OTP_RESEND_SECONDS']}), 202
+
+@bp.post('/api/integration/bookstream/login/<request_id>/verify-user')
+@service_required
+def bookstream_login_verify_user(request_id):
+    from flask import current_app
+    access_request = IntegrationAccessRequest.query.filter_by(request_id=request_id, request_type='BOOKSTREAM_DUAL_APPROVAL').first_or_404()
+    if _expire_bookstream_request(access_request):
+        return jsonify({'status': 'DENIED', 'message': 'This sign-in request expired. Please sign in again.'}), 410
+    if access_request.status != 'PENDING_USER':
+        return jsonify({'status': access_request.status, 'message': 'This sign-in request is no longer waiting for email verification.'}), 409
+    identity = SecurityIdentity.query.filter_by(bookstream_user_id=access_request.bookstream_user_id).first()
+    if not identity or identity.status != 'ACTIVE':
+        access_request.status = 'DENIED'; access_request.user_otp_hash = None; access_request.decided_at = datetime.utcnow(); db.session.commit()
+        return jsonify({'status': 'DENIED', 'message': 'Your BookStream account is restricted. Please contact the administrator.'}), 403
+
+    code = str((request.get_json(silent=True) or {}).get('code', '')).strip()
+    if access_request.user_otp_expires_at and access_request.user_otp_expires_at <= datetime.utcnow():
+        return jsonify({'status': 'PENDING_USER', 'message': 'That code has expired. Request a new code when the resend button becomes available.'}), 410
+    if not code or not access_request.user_otp_hash or not hmac.compare_digest(_otp_hash(code), access_request.user_otp_hash):
+        access_request.user_otp_attempts = (access_request.user_otp_attempts or 0) + 1
+        remaining = max(0, 5 - access_request.user_otp_attempts)
+        if remaining == 0:
+            access_request.status = 'DENIED'; access_request.user_otp_hash = None; access_request.decided_at = datetime.utcnow()
+            _event(access_request.bookstream_user_id, 'LOGIN_FAILED', ip_address=access_request.ip_address,
+                   device_fingerprint=access_request.device_fingerprint, user_agent=access_request.user_agent,
+                   location=access_request.location, risk_score=access_request.risk_score,
+                   risk_level=access_request.risk_level, action='DENIED', reason='Too many incorrect BookStream email OTP attempts')
+        db.session.commit()
+        if remaining == 0:
+            return jsonify({'status': 'DENIED', 'message': 'Too many incorrect codes. Please start sign-in again.'}), 429
+        return jsonify({'status': 'PENDING_USER', 'message': f'Incorrect code. {remaining} attempt(s) remain.'}), 400
+
+    admin_code = secrets.token_hex(4).upper()
+    access_request.user_otp_hash = None
+    access_request.user_verified_at = datetime.utcnow()
+    access_request.admin_otp_hash = _otp_hash(admin_code)
+    access_request.admin_otp_expires_at = datetime.utcnow() + timedelta(seconds=current_app.config['BOOKSTREAM_ADMIN_OTP_VALID_SECONDS'])
+    access_request.admin_otp_attempts = 0
+    access_request.status = 'PENDING'
+    active_count = _active_session_count(access_request.bookstream_user_id)
+    _event(access_request.bookstream_user_id, 'LOGIN_USER_OTP_VERIFIED', ip_address=access_request.ip_address,
+           device_fingerprint=access_request.device_fingerprint, user_agent=access_request.user_agent,
+           location=access_request.location, risk_score=access_request.risk_score,
+           anomaly_score=access_request.anomaly_score, risk_level=access_request.risk_level,
+           action='PENDING_ADMIN_APPROVAL', reason='User email verified; awaiting CloudSentinel administrator decision')
+    db.session.commit()
+
+    details = {
+        'BookStream user': access_request.username,
+        'Registered email': access_request.email,
+        'Request ID': access_request.request_id,
+        'Device ID / fingerprint': access_request.device_fingerprint or 'Unavailable',
+        'Active BookStream sessions': active_count,
+        'IP address': access_request.ip_address,
+        'Location': access_request.location,
+        'Browser / device': access_request.user_agent or 'Unavailable',
+        'Risk': f'{access_request.risk_level} ({access_request.risk_score:.1f}/100)',
+    }
+    sent, _ = send_bookstream_admin_otp(current_app.config, admin_code, details)
+    if not sent:
+        access_request.status = 'DENIED'; access_request.admin_otp_hash = None; access_request.decided_at = datetime.utcnow()
+        access_request.reasons = (access_request.reasons or '')[:700] + ' Admin notification could not be delivered.'
+        db.session.commit()
+        return jsonify({'status': 'DENIED', 'message': 'The administrator could not be notified, so sign-in was not completed. Please try again later.'}), 503
+    return jsonify({'status': 'PENDING', 'step': 'ADMIN_APPROVAL', 'request_id': request_id,
+                    'admin_otp_valid_seconds': current_app.config['BOOKSTREAM_ADMIN_OTP_VALID_SECONDS']}), 202
+
+@bp.post('/api/integration/bookstream/login/<request_id>/resend-user')
+@service_required
+def bookstream_login_resend_user(request_id):
+    from flask import current_app
+    access_request = IntegrationAccessRequest.query.filter_by(request_id=request_id, request_type='BOOKSTREAM_DUAL_APPROVAL').first_or_404()
+    if _expire_bookstream_request(access_request):
+        return jsonify({'status': 'DENIED', 'message': 'This sign-in request expired. Please sign in again.'}), 410
+    if access_request.status != 'PENDING_USER':
+        return jsonify({'message': 'This request is no longer waiting for email verification.'}), 409
+    now = datetime.utcnow()
+    if access_request.challenge_expires_at and access_request.challenge_expires_at <= now:
+        access_request.status = 'DENIED'; access_request.user_otp_hash = None; access_request.decided_at = now; db.session.commit()
+        return jsonify({'status': 'DENIED', 'message': 'This sign-in request expired. Please sign in again.'}), 410
+    wait_for = current_app.config['BOOKSTREAM_OTP_RESEND_SECONDS'] - int((now - access_request.user_otp_last_sent_at).total_seconds())
+    if wait_for > 0:
+        return jsonify({'message': f'Please wait {wait_for} seconds before requesting another code.', 'retry_after_seconds': wait_for}), 429
+    if (access_request.user_otp_resends or 0) >= current_app.config['BOOKSTREAM_OTP_MAX_RESENDS']:
+        return jsonify({'message': 'You have reached the resend limit. Please start sign-in again.'}), 429
+    identity = SecurityIdentity.query.filter_by(bookstream_user_id=access_request.bookstream_user_id).first()
+    if not identity or identity.status != 'ACTIVE':
+        access_request.status = 'DENIED'; access_request.user_otp_hash = None; access_request.decided_at = now; db.session.commit()
+        return jsonify({'status': 'DENIED', 'message': 'Your BookStream account is restricted. Please contact the administrator.'}), 403
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    access_request.user_otp_hash = _otp_hash(code)
+    access_request.user_otp_expires_at = now + timedelta(seconds=current_app.config['BOOKSTREAM_USER_OTP_VALID_SECONDS'])
+    access_request.user_otp_last_sent_at = now
+    access_request.user_otp_attempts = 0
+    access_request.user_otp_resends = (access_request.user_otp_resends or 0) + 1
+    db.session.commit()
+    sent, mail_error = send_bookstream_login_otp(current_app.config, identity, code)
+    if not sent:
+        print('BookStream sign-in OTP resend failed:', mail_error)
+        access_request.status = 'DENIED'; access_request.user_otp_hash = None; access_request.decided_at = datetime.utcnow(); db.session.commit()
+        return jsonify({'message': 'We could not send another code. Please start sign-in again later.'}), 503
+    return jsonify({'status': 'PENDING_USER', 'message': 'A new code was sent to your registered email.',
+                    'resend_after_seconds': current_app.config['BOOKSTREAM_OTP_RESEND_SECONDS'],
+                    'otp_valid_seconds': current_app.config['BOOKSTREAM_USER_OTP_VALID_SECONDS']})
 
 @bp.post('/api/integration/users')
 @service_required
@@ -154,6 +366,7 @@ def events():
 @service_required
 def access_status(request_id):
     ar=IntegrationAccessRequest.query.filter_by(request_id=request_id).first_or_404()
+    _expire_bookstream_request(ar)
     if ar.status=='APPROVED':
         if not ar.security_session_id:
             sid='CS-'+secrets.token_hex(24)
@@ -164,6 +377,11 @@ def access_status(request_id):
         return jsonify({'status':'APPROVED','security_session_id':ar.security_session_id,'bookstream_user_id':ar.bookstream_user_id})
     if ar.status=='DENIED' and ar.request_type=='FROZEN_ACCOUNT_LOGIN':
         return jsonify({'status':'DENIED','risk_score':ar.risk_score,'risk_level':ar.risk_level,'message':'Your BookStream account remains frozen and blocked. Please contact the BookStream administrator if you believe this is a mistake. An administrator reviewed this sign-in attempt and chose to keep the account frozen.'})
+    if ar.status=='DENIED' and ar.request_type=='BOOKSTREAM_DUAL_APPROVAL':
+        message = ('This sign-in request was replaced by a newer attempt. Use the newest email code to continue.'
+                   if 'Replaced by a newer sign-in attempt.' in (ar.reasons or '')
+                   else 'This BookStream sign-in was not approved or the verification code expired. Please contact the BookStream administrator if you need help.')
+        return jsonify({'status':'DENIED','risk_score':ar.risk_score,'risk_level':ar.risk_level,'message':message})
     return jsonify({'status':ar.status,'risk_score':ar.risk_score,'risk_level':ar.risk_level})
 
 @bp.post('/api/integration/session/validate')
@@ -307,6 +525,62 @@ def admin_approval(request_id):
     frozen_review=ar.request_type=='FROZEN_ACCOUNT_LOGIN'
     allowed=('UNFREEZE','KEEP_FROZEN') if frozen_review else ('APPROVE','DENY')
     if decision not in allowed: return jsonify({'message':'Invalid decision for this request'}),400
+    if ar.request_type=='BOOKSTREAM_DUAL_APPROVAL':
+        if ar.status != 'PENDING' or not ar.user_verified_at:
+            return jsonify({'message':'This request has not completed user email verification or is no longer pending.'}),409
+        if _expire_bookstream_request(ar):
+            return jsonify({'status':'DENIED','message':'The administrator approval code expired. Ask the user to sign in again.'}),410
+        if decision=='APPROVE':
+            code=str((request.get_json(silent=True) or {}).get('admin_code','')).strip().upper()
+            expected=ar.admin_otp_hash or ''
+            if not code or not expected or not hmac.compare_digest(_otp_hash(code),expected):
+                ar.admin_otp_attempts=(ar.admin_otp_attempts or 0)+1
+                if ar.admin_otp_attempts>=5:
+                    ar.status='DENIED'; ar.admin_otp_hash=None; ar.decided_at=datetime.utcnow()
+                    _event(ar.bookstream_user_id,'ADMIN_APPROVAL_FAILED',ip_address=ar.ip_address,device_fingerprint=ar.device_fingerprint,
+                           user_agent=ar.user_agent,location=ar.location,risk_score=ar.risk_score,risk_level=ar.risk_level,
+                           action='DENIED',reason='Too many incorrect request-bound administrator OTP attempts')
+                db.session.commit()
+                return jsonify({'message':'Incorrect administrator code.' if ar.status=='PENDING' else 'Too many incorrect codes; the request was denied.'}),400
+            identity=SecurityIdentity.query.filter_by(bookstream_user_id=ar.bookstream_user_id).first()
+            if not identity or identity.status!='ACTIVE':
+                ar.status='DENIED'; ar.admin_otp_hash=None; ar.decided_at=datetime.utcnow(); db.session.commit()
+                return jsonify({'message':'The BookStream account is restricted. Access was not approved.'}),403
+            cutoff=datetime.utcnow()-SESSION_PRESENCE_WINDOW
+            active_sessions=SecuritySession.query.filter_by(bookstream_user_id=ar.bookstream_user_id,status='ACTIVE').filter(SecuritySession.last_activity>=cutoff).all()
+            different_device=next((s for s in active_sessions if s.device_fingerprint != ar.device_fingerprint),None)
+            if different_device:
+                return jsonify({'message':'This user already has an active session on another device. Review the device in the BookStream security profile and revoke that session before approving this request.'}),409
+            now=datetime.utcnow()
+            # Keep exactly one active session for this account. Revoke the older same-device
+            # session and stale sessions when the new approval is committed.
+            old_sessions=SecuritySession.query.filter_by(bookstream_user_id=ar.bookstream_user_id,status='ACTIVE').all()
+            for old in old_sessions:
+                old.status='REVOKED'; old.ended_at=now; old.last_activity=now
+                _event(ar.bookstream_user_id,'SESSION_END',ip_address=old.ip_address,device_fingerprint=old.device_fingerprint,
+                       user_agent=old.user_agent,location=old.location,session_id=old.session_id,risk_score=old.risk_score,
+                       risk_level=old.risk_level,action='REVOKED',reason='Replaced by a newly approved BookStream login')
+            sid='CS-'+secrets.token_hex(24)
+            db.session.add(SecuritySession(session_id=sid,bookstream_user_id=ar.bookstream_user_id,ip_address=ar.ip_address,
+                device_fingerprint=ar.device_fingerprint,user_agent=ar.user_agent,location=ar.location,
+                risk_score=ar.risk_score,risk_level=ar.risk_level,created_at=now,last_activity=now))
+            ar.security_session_id=sid
+            ar.status='APPROVED'; ar.decided_by=current_user.id; ar.decided_at=now; ar.admin_otp_hash=None
+            _event(ar.bookstream_user_id,'SESSION_START',ip_address=ar.ip_address,device_fingerprint=ar.device_fingerprint,
+                   user_agent=ar.user_agent,location=ar.location,session_id=sid,risk_score=ar.risk_score,
+                   anomaly_score=ar.anomaly_score,risk_level=ar.risk_level,action='RUNNING',reason='BookStream session started after both approvals')
+            _event(ar.bookstream_user_id,'ADMIN_APPROVAL',ip_address=ar.ip_address,device_fingerprint=ar.device_fingerprint,
+                   user_agent=ar.user_agent,location=ar.location,session_id=sid,risk_score=ar.risk_score,
+                   anomaly_score=ar.anomaly_score,risk_level=ar.risk_level,action='APPROVED',reason='CloudSentinel admin code verified; BookStream session started')
+            identity.last_seen=now
+            db.session.commit()
+            return jsonify({'status':'APPROVED','security_session_id':sid})
+        ar.status='DENIED'; ar.decided_by=current_user.id; ar.decided_at=datetime.utcnow(); ar.admin_otp_hash=None
+        _event(ar.bookstream_user_id,'ADMIN_APPROVAL',ip_address=ar.ip_address,device_fingerprint=ar.device_fingerprint,
+               user_agent=ar.user_agent,location=ar.location,risk_score=ar.risk_score,anomaly_score=ar.anomaly_score,
+               risk_level=ar.risk_level,action='DENIED',reason='CloudSentinel administrator denied BookStream access')
+        db.session.commit()
+        return jsonify({'status':'DENIED'})
     if frozen_review and decision=='UNFREEZE':
         try:
             data=_bookstream_request('/api/integration/admin/users/'+str(ar.bookstream_user_id),'PATCH',{'status':'ACTIVE'})
@@ -323,6 +597,19 @@ def admin_approval(request_id):
     ar.decided_by=current_user.id; ar.decided_at=datetime.utcnow()
     _event(ar.bookstream_user_id,'ADMIN_APPROVAL',ip_address=ar.ip_address,device_fingerprint=ar.device_fingerprint,location=ar.location,risk_score=ar.risk_score,anomaly_score=ar.anomaly_score,risk_level=ar.risk_level,action=ar.status,reason=action_reason)
     db.session.commit(); return jsonify({'status':ar.status})
+
+@bp.post('/api/admin/integration/session/<session_id>/revoke')
+def revoke_bookstream_session(session_id):
+    from flask_login import current_user
+    if not current_user.is_authenticated or current_user.role!='admin': return jsonify({'message':'Admin required'}),403
+    ss=SecuritySession.query.filter_by(session_id=session_id).first_or_404()
+    if ss.status=='ACTIVE':
+        now=datetime.utcnow(); ss.status='REVOKED'; ss.ended_at=now; ss.last_activity=now
+        _event(ss.bookstream_user_id,'SESSION_END',ip_address=ss.ip_address,device_fingerprint=ss.device_fingerprint,
+               user_agent=ss.user_agent,location=ss.location,session_id=ss.session_id,risk_score=ss.risk_score,
+               risk_level=ss.risk_level,action='REVOKED',reason='Revoked by CloudSentinel administrator before approving a different device')
+        db.session.commit()
+    return jsonify({'revoked':True})
 
 @bp.get('/api/admin/integration/analytics')
 def admin_analytics():

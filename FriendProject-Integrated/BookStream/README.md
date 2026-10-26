@@ -143,7 +143,7 @@ npm start
 ### Environment Configuration
 The backend `.env` file is already configured with:
 ```
-PORT=5000
+PORT=5001
 MONGODB_URI=mongodb+srv://username:password@cluster0.xxxxx.mongodb.net/bookstream?retryWrites=true&w=majority
 JWT_SECRET=your_super_secret_jwt_key_change_this_in_production_123456789
 NODE_ENV=development
@@ -160,12 +160,16 @@ To access admin features (uploading books), register with an email ending in `@a
 
 ### Default Ports
 - **Frontend**: http://localhost:3000
-- **Backend**: http://localhost:5000
+- **Backend**: http://localhost:5001
 
 ### API Endpoints
 - `GET /api/books` - Get all books (with pagination and search)
 - `POST /api/auth/register` - User registration
 - `POST /api/auth/login` - User login
+
+### Integrated CloudSentinel login
+
+In the integrated project, a correct password starts a two-stage sign-in. BookStream emails a six-digit code to the registered address; it expires after two minutes and can be resent after the two-minute cooldown (up to three resends). After email verification, CloudSentinel emails a request-bound approval code to the administrator. The user receives a BookStream session only after admin approval. The admin can inspect the browser's persistent BookStream device ID and active sessions; a different active device must be revoked from that user's security profile before approval. SMTP must be configured for both codes; login fails closed if delivery is unavailable.
 - `GET /api/auth/me` - Get current user (protected)
 - `POST /api/books` - Upload book (admin only)
 - `GET /api/books/:id` - Get book details
